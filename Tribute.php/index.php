@@ -105,7 +105,7 @@
   <section id="bio" class="section container">
     <div class="row align-items-center">
       <div class="col-md-5 mb-4 mb-md-0" data-aos="fade-right">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/b/b0/A._P._J._Abdul_Kalam.jpg" 
+        <img src="image.png" 
              class="img-fluid rounded-4 shadow-lg" alt="APJ Abdul Kalam">
       </div>
       <div class="col-md-7" data-aos="fade-left">
