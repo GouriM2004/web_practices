@@ -1,0 +1,36 @@
+/* Hero Section */
+.hero {
+  background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url('assets/images/hero-bg.jpg') no-repeat center center/cover;
+  height: 90vh;
+  display: flex;
+  align-items: center;
+  text-align: center;
+}
+
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Card Hover Effect */
+.hover-card:hover {
+  transform: translateY(-10px) scale(1.05);
+  transition: 0.3s;
+}
+
+/* Button Hover */
+.btn-primary:hover {
+  background-color: #0056b3;
+  transform: scale(1.05);
+  transition: 0.3s;
+}
+
+/* Footer Social Icons */
+footer i {
+  font-size: 1.2rem;
+  transition: 0.3s;
+}
+footer i:hover {
+  color: #0d6efd;
+  transform: scale(1.2);
+}
