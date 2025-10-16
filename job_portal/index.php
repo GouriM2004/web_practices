@@ -41,6 +41,7 @@
 </head>
 <body>
 
+<div class="main-content">
 <!-- Navbar -->
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container">
@@ -129,6 +130,7 @@
       </form>
     </div>
   </div>
+</div>
 </div>
 
 <!-- Footer -->
