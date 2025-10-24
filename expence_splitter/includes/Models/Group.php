@@ -2,13 +2,16 @@
 // includes/Models/Group.php
 require_once __DIR__ . '/../Database.php';
 
-class Group {
+class Group
+{
     private $db;
-    public function __construct() {
+    public function __construct()
+    {
         $this->db = Database::getConnection();
     }
 
-    public function create($name, $created_by) {
+    public function create($name, $created_by)
+    {
         $stmt = $this->db->prepare('INSERT INTO groups_tbl (name, created_by) VALUES (?, ?)');
         $stmt->bind_param('si', $name, $created_by);
         if ($stmt->execute()) {
@@ -25,7 +28,8 @@ class Group {
         return false;
     }
 
-    public function addMember($group_id, $user_id) {
+    public function addMember($group_id, $user_id)
+    {
         $stmt = $this->db->prepare('INSERT IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)');
         $stmt->bind_param('ii', $group_id, $user_id);
         $res = $stmt->execute();
@@ -33,7 +37,8 @@ class Group {
         return $res;
     }
 
-    public function getUserGroups($user_id) {
+    public function getUserGroups($user_id)
+    {
         $stmt = $this->db->prepare('SELECT g.id, g.name, g.created_at FROM groups_tbl g JOIN group_members gm ON g.id = gm.group_id WHERE gm.user_id = ?');
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
@@ -42,7 +47,8 @@ class Group {
         return $res;
     }
 
-    public function getGroup($group_id, $user_id = null) {
+    public function getGroup($group_id, $user_id = null)
+    {
         if ($user_id) {
             $stmt = $this->db->prepare('SELECT g.* FROM groups_tbl g JOIN group_members gm ON g.id = gm.group_id WHERE g.id = ? AND gm.user_id = ?');
             $stmt->bind_param('ii', $group_id, $user_id);
@@ -56,12 +62,29 @@ class Group {
         return $res ?: null;
     }
 
-    public function getMembers($group_id) {
+    public function getMembers($group_id)
+    {
         $stmt = $this->db->prepare('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?');
         $stmt->bind_param('i', $group_id);
         $stmt->execute();
         $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
         return $res;
+    }
+
+    /**
+     * Delete a group. Only the group creator (created_by) can delete the group.
+     * Returns true on success (group deleted), false otherwise.
+     */
+    public function delete($group_id, $user_id)
+    {
+        // Use a prepared statement that ensures only the creator can delete
+        $stmt = $this->db->prepare('DELETE FROM groups_tbl WHERE id = ? AND created_by = ?');
+        if (!$stmt) return false;
+        $stmt->bind_param('ii', $group_id, $user_id);
+        $res = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        return ($res && $affected > 0);
     }
 }
