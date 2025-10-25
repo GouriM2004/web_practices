@@ -87,4 +87,36 @@ class Group
         $stmt->close();
         return ($res && $affected > 0);
     }
+
+    /**
+     * Remove a member from a group.
+     * The requester ($requester_id) can remove a member if they are the group's creator.
+     * A user can also remove themselves (leave the group) unless they are the group's creator.
+     * Returns true on success, false otherwise.
+     */
+    public function removeMember($group_id, $target_user_id, $requester_id)
+    {
+        // fetch group to check creator
+        $group = $this->getGroup($group_id);
+        if (!$group) return false;
+        $creator = $group['created_by'] ?? null;
+
+        // cannot remove the creator from the group
+        if ($target_user_id == $creator) {
+            return false;
+        }
+
+        // allow if requester is creator (kick) or requester is the target user (leave)
+        if ($requester_id != $creator && $requester_id != $target_user_id) {
+            return false;
+        }
+
+        $stmt = $this->db->prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?');
+        if (!$stmt) return false;
+        $stmt->bind_param('ii', $group_id, $target_user_id);
+        $res = $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        return ($res && $affected > 0);
+    }
 }

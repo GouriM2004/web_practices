@@ -24,6 +24,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_group'])) {
   }
 }
 
+// Handle remove member (creator can remove others, member can leave self)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_member'])) {
+  $target = intval($_POST['target_user_id'] ?? 0);
+  if ($target > 0) {
+    if ($groupModel->removeMember($group_id, $target, $user_id)) {
+      header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Member removed'));
+      exit;
+    } else {
+      $err = 'Failed to remove member. You must be the group creator to remove others, and the creator cannot be removed.';
+    }
+  }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   $title = trim($_POST['title'] ?? '');
   $amount = floatval($_POST['amount'] ?? 0);
@@ -131,8 +144,28 @@ $settlements = $calculator->settleBalances($balances);
             <ul class="list-group">
               <?php foreach ($members as $m): ?>
                 <li class="list-group-item d-flex justify-content-between align-items-center">
-                  <?= htmlspecialchars($m['name']) ?>
-                  <span class="badge bg-secondary">₹<?= number_format($balances[$m['id']] ?? 0, 2) ?></span>
+                  <div>
+                    <?= htmlspecialchars($m['name']) ?>
+                    <?php if ($m['id'] == $group['created_by']): ?>
+                      <small class="text-muted"> (creator)</small>
+                    <?php endif; ?>
+                  </div>
+                  <div class="d-flex align-items-center">
+                    <span class="badge bg-secondary me-2">₹<?= number_format($balances[$m['id']] ?? 0, 2) ?></span>
+                    <?php // Show remove button to creator for other members, or show "Leave" to non-creator members 
+                    ?>
+                    <?php if ($user_id == $group['created_by'] && $m['id'] != $group['created_by']): ?>
+                      <form method="post" style="display:inline;">
+                        <input type="hidden" name="target_user_id" value="<?= $m['id'] ?>">
+                        <button name="remove_member" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove <?= htmlspecialchars($m['name']) ?> from the group?')">Remove</button>
+                      </form>
+                    <?php elseif ($m['id'] == $user_id && $user_id != $group['created_by']): ?>
+                      <form method="post" style="display:inline;">
+                        <input type="hidden" name="target_user_id" value="<?= $m['id'] ?>">
+                        <button name="remove_member" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Leave the group?')">Leave</button>
+                      </form>
+                    <?php endif; ?>
+                  </div>
                 </li>
               <?php endforeach; ?>
             </ul>
