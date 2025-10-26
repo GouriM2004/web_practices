@@ -119,4 +119,42 @@ class Group
         $stmt->close();
         return ($res && $affected > 0);
     }
+
+    /**
+     * Transfer group ownership to another member.
+     * Only current creator can transfer ownership. The target user must be a member of the group.
+     * Returns true on success, false otherwise.
+     */
+    public function transferOwnership($group_id, $new_owner_id, $requester_id)
+    {
+        // fetch group to check creator
+        $group = $this->getGroup($group_id);
+        if (!$group) return false;
+        $creator = $group['created_by'] ?? null;
+
+        // only creator can transfer
+        if ($requester_id != $creator) return false;
+
+        // cannot transfer to same creator
+        if ($new_owner_id == $creator) return false;
+
+        // ensure new owner is a member
+        $stmt = $this->db->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1');
+        if (!$stmt) return false;
+        $stmt->bind_param('ii', $group_id, $new_owner_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $isMember = ($res && $res->num_rows > 0);
+        $stmt->close();
+        if (!$isMember) return false;
+
+        // perform update
+        $stmt2 = $this->db->prepare('UPDATE groups_tbl SET created_by = ? WHERE id = ? AND created_by = ?');
+        if (!$stmt2) return false;
+        $stmt2->bind_param('iii', $new_owner_id, $group_id, $creator);
+        $ok = $stmt2->execute();
+        $affected = $stmt2->affected_rows;
+        $stmt2->close();
+        return ($ok && $affected > 0);
+    }
 }

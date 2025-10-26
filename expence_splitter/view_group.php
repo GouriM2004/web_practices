@@ -37,6 +37,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_member'])) {
   }
 }
 
+// Handle transfer ownership (creator can transfer to another member)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfer_owner'])) {
+  $target = intval($_POST['target_user_id'] ?? 0);
+  if ($target > 0) {
+    if ($groupModel->transferOwnership($group_id, $target, $user_id)) {
+      header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Ownership transferred'));
+      exit;
+    } else {
+      $err = 'Failed to transfer ownership. Only the creator can transfer and the target must be a member.';
+    }
+  }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   $title = trim($_POST['title'] ?? '');
   $amount = floatval($_POST['amount'] ?? 0);
@@ -155,6 +168,10 @@ $settlements = $calculator->settleBalances($balances);
                     <?php // Show remove button to creator for other members, or show "Leave" to non-creator members 
                     ?>
                     <?php if ($user_id == $group['created_by'] && $m['id'] != $group['created_by']): ?>
+                      <form method="post" style="display:inline;margin-right:6px;">
+                        <input type="hidden" name="target_user_id" value="<?= $m['id'] ?>">
+                        <button name="transfer_owner" class="btn btn-sm btn-outline-success" onclick="return confirm('Make <?= htmlspecialchars($m['name']) ?> the new group owner?')">Make owner</button>
+                      </form>
                       <form method="post" style="display:inline;">
                         <input type="hidden" name="target_user_id" value="<?= $m['id'] ?>">
                         <button name="remove_member" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove <?= htmlspecialchars($m['name']) ?> from the group?')">Remove</button>
