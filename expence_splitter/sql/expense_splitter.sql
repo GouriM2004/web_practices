@@ -47,3 +47,16 @@ CREATE TABLE IF NOT EXISTS expense_shares (
   FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Settlements table: records payments made between users to settle balances
+CREATE TABLE IF NOT EXISTS settlements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT NOT NULL,
+  payer_id INT NOT NULL,
+  receiver_id INT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE,
+  FOREIGN KEY (payer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+);

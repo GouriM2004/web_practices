@@ -7,6 +7,7 @@ $user_id = $_SESSION['user_id'];
 $groupModel = new Group();
 $expenseModel = new Expense();
 $calculator = new Calculator();
+$settModel = new Settlement();
 $group_id = intval($_GET['id'] ?? 0);
 if ($group_id <= 0) header('Location: dashboard.php');
 $group = $groupModel->getGroup($group_id, $user_id);
@@ -50,6 +51,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfer_owner'])) {
   }
 }
 
+// Handle marking a suggested settlement as paid
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_settled'])) {
+  $from = intval($_POST['from_user'] ?? 0);
+  $to = intval($_POST['to_user'] ?? 0);
+  $amt = floatval($_POST['amount'] ?? 0);
+  if ($from > 0 && $to > 0 && $amt > 0) {
+    // only allow payer to mark as paid
+    if ($user_id === $from) {
+      if ($settModel->addSettlement($group_id, $from, $to, $amt)) {
+        header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Marked as settled'));
+        exit;
+      } else {
+        $err = 'Failed to record settlement.';
+      }
+    } else {
+      $err = 'Only the payer can mark this as settled.';
+    }
+  }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   $title = trim($_POST['title'] ?? '');
   $amount = floatval($_POST['amount'] ?? 0);
@@ -66,6 +87,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
 
 $balances = $calculator->computeBalances($group_id);
 $settlements = $calculator->settleBalances($balances);
+// check if balances are all (near) zero
+$allSettled = true;
+foreach ($balances as $b) {
+  if (abs($b) > 0.01) {
+    $allSettled = false;
+    break;
+  }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -192,23 +221,40 @@ $settlements = $calculator->settleBalances($balances);
         <div class="card mb-3">
           <div class="card-body">
             <h6>Settle Up Suggestions</h6>
-            <?php if (count($settlements) === 0): ?>
-              <p class="text-muted">All settled up!</p>
+            <?php if ($allSettled): ?>
+              <div class="alert alert-success">All Settled</div>
             <?php else: ?>
-              <ul class="list-group">
-                <?php
-                $names = [];
-                foreach ($members as $m) $names[$m['id']] = $m['name'];
-                foreach ($settlements as $t):
-                ?>
-                  <li class="list-group-item">
-                    <strong><?= htmlspecialchars($names[$t['from']] ?? $t['from']) ?></strong>
-                    pays
-                    <strong><?= htmlspecialchars($names[$t['to']] ?? $t['to']) ?></strong>
-                    <span class="float-end">₹<?= number_format($t['amount'], 2) ?></span>
-                  </li>
-                <?php endforeach; ?>
-              </ul>
+              <?php if (count($settlements) === 0): ?>
+                <p class="text-muted">No suggested settlements at the moment.</p>
+              <?php else: ?>
+                <ul class="list-group">
+                  <?php
+                  $names = [];
+                  foreach ($members as $m) $names[$m['id']] = $m['name'];
+                  foreach ($settlements as $t):
+                  ?>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                      <div>
+                        <strong><?= htmlspecialchars($names[$t['from']] ?? $t['from']) ?></strong>
+                        pays
+                        <strong><?= htmlspecialchars($names[$t['to']] ?? $t['to']) ?></strong>
+                      </div>
+                      <div class="d-flex align-items-center">
+                        <span class="me-2">₹<?= number_format($t['amount'], 2) ?></span>
+                        <?php if ($user_id === $t['from']): // payer can mark as settled 
+                        ?>
+                          <form method="post" style="display:inline;">
+                            <input type="hidden" name="from_user" value="<?= intval($t['from']) ?>">
+                            <input type="hidden" name="to_user" value="<?= intval($t['to']) ?>">
+                            <input type="hidden" name="amount" value="<?= htmlspecialchars($t['amount']) ?>">
+                            <button name="mark_settled" class="btn btn-sm btn-primary" onclick="return confirm('Mark this transaction as settled?')">Mark settled</button>
+                          </form>
+                        <?php endif; ?>
+                      </div>
+                    </li>
+                  <?php endforeach; ?>
+                </ul>
+              <?php endif; ?>
             <?php endif; ?>
           </div>
         </div>
