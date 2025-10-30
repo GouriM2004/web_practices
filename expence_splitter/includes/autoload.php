@@ -6,6 +6,7 @@ spl_autoload_register(function ($class) {
         'Group' => __DIR__ . '/Models/Group.php',
         'Expense' => __DIR__ . '/Models/Expense.php',
         'Settlement' => __DIR__ . '/Models/Settlement.php',
+        'Notification' => __DIR__ . '/Models/Notification.php',
         'Database' => __DIR__ . '/Database.php',
         'Config' => __DIR__ . '/Config.php',
         'Calculator' => __DIR__ . '/Helpers/Calculator.php',

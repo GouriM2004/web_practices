@@ -30,6 +30,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_member'])) {
   $target = intval($_POST['target_user_id'] ?? 0);
   if ($target > 0) {
     if ($groupModel->removeMember($group_id, $target, $user_id)) {
+      // notify remaining members
+      $notif = new Notification();
+      $rem = $groupModel->getMembers($group_id); // fresh list
+      $uids = [];
+      foreach ($rem as $r) $uids[] = intval($r['id']);
+      $actor = ($user_id == $target) ? 'left' : 'was removed from';
+      // get target name
+      $tname = '';
+      foreach ($rem as $r) {
+        if (intval($r['id']) == $target) {
+          $tname = $r['name'];
+          break;
+        }
+      }
+      // fallback: fetch name if missing
+      if (empty($tname)) {
+        $stmt = (Database::getConnection())->prepare('SELECT name FROM users WHERE id = ?');
+        if ($stmt) {
+          $stmt->bind_param('i', $target);
+          $stmt->execute();
+          $rr = $stmt->get_result()->fetch_assoc();
+          $tname = $rr['name'] ?? '';
+          $stmt->close();
+        }
+      }
+      $message = sprintf('%s %s the group %s', $tname, $actor, $group['name']);
+      if (!empty($uids)) $notif->addNotifications($uids, $message, $group_id);
+
       header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Member removed'));
       exit;
     } else {
@@ -76,8 +104,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   $amount = floatval($_POST['amount'] ?? 0);
   $paid_by = intval($_POST['paid_by'] ?? 0);
   $shared_with = $_POST['shared_with'] ?? [];
+  $split_mode = $_POST['split_mode'] ?? 'equal';
+  $split_values = null;
+
+  if ($split_mode === 'percentage') {
+    $split_values = [];
+    foreach ($members as $m) {
+      $id = $m['id'];
+      if (in_array($id, $shared_with)) {
+        $pct = floatval($_POST['pct_' . $id] ?? 0);
+        $split_values[$id] = $pct;
+      }
+    }
+  } elseif ($split_mode === 'custom') {
+    $split_values = [];
+    foreach ($members as $m) {
+      $id = $m['id'];
+      if (in_array($id, $shared_with)) {
+        $amt_val = floatval($_POST['amt_' . $id] ?? 0);
+        $split_values[$id] = $amt_val;
+      }
+    }
+  }
+
   if ($title && $amount > 0 && $paid_by > 0 && is_array($shared_with) && count($shared_with) > 0) {
-    $expenseModel->addExpense($group_id, $title, $amount, $paid_by, $shared_with);
+    $expenseModel->addExpense($group_id, $title, $amount, $paid_by, $shared_with, $split_mode, $split_values);
     header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Expense added'));
     exit;
   } else {
@@ -162,17 +213,39 @@ foreach ($balances as $b) {
           </div>
 
           <div class="mb-2">
-            <label>Shared with (select one or more)</label>
+            <label>Split options</label>
+            <div class="mb-2">
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="split_mode" id="split_equal" value="equal" checked>
+                <label class="form-check-label" for="split_equal">Split equally</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="split_mode" id="split_percent" value="percentage">
+                <label class="form-check-label" for="split_percent">Split by percentage</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="split_mode" id="split_custom" value="custom">
+                <label class="form-check-label" for="split_custom">Custom amounts</label>
+              </div>
+            </div>
+
             <div class="row">
               <?php foreach ($members as $m): ?>
-                <div class="col-6 col-md-4">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="shared_with[]" value="<?= $m['id'] ?>" id="u<?= $m['id'] ?>" checked>
-                    <label class="form-check-label" for="u<?= $m['id'] ?>"><?= htmlspecialchars($m['name']) ?></label>
+                <div class="col-12 col-md-6 mb-2">
+                  <div class="d-flex align-items-center">
+                    <div class="form-check me-2">
+                      <input class="form-check-input member-check" type="checkbox" name="shared_with[]" value="<?= $m['id'] ?>" id="u<?= $m['id'] ?>" checked>
+                    </div>
+                    <label class="form-check-label me-2" for="u<?= $m['id'] ?>"><?= htmlspecialchars($m['name']) ?></label>
+                    <div class="split-inputs d-flex">
+                      <input type="number" step="0.01" min="0" name="pct_<?= $m['id'] ?>" placeholder="%" class="form-control form-control-sm me-2 pct-input" style="width:100px; display:none;">
+                      <input type="number" step="0.01" min="0" name="amt_<?= $m['id'] ?>" placeholder="amt" class="form-control form-control-sm me-2 amt-input" style="width:120px; display:none;">
+                    </div>
                   </div>
                 </div>
               <?php endforeach; ?>
             </div>
+            <small class="text-muted">Choose who participates and pick a split mode. For percentage/custom, fill values for selected members.</small>
           </div>
 
           <button name="add_expense" class="btn btn-primary">Add Expense</button>
@@ -284,3 +357,47 @@ foreach ($balances as $b) {
 </body>
 
 </html>
+<script>
+  // Split mode UI handling
+  document.addEventListener('DOMContentLoaded', function() {
+    function updateInputs() {
+      const mode = document.querySelector('input[name="split_mode"]:checked').value;
+      const checks = Array.from(document.querySelectorAll('.member-check')).filter(c => c.checked);
+      const cnt = checks.length || 1;
+      const amountInput = document.querySelector('input[name="amount"]');
+      const amount = parseFloat(amountInput ? amountInput.value : 0) || 0;
+      document.querySelectorAll('.pct-input').forEach(function(el) {
+        el.style.display = (mode === 'percentage') ? 'inline-block' : 'none';
+      });
+      document.querySelectorAll('.amt-input').forEach(function(el) {
+        el.style.display = (mode === 'custom') ? 'inline-block' : 'none';
+      });
+      if (mode === 'percentage') {
+        const val = +(100 / cnt).toFixed(2);
+        checks.forEach(function(c) {
+          const id = c.value;
+          const el = document.querySelector('input[name="pct_' + id + '"]');
+          if (el) el.value = val;
+        });
+      }
+      if (mode === 'custom') {
+        const val = amount > 0 ? +(amount / cnt).toFixed(2) : '';
+        checks.forEach(function(c) {
+          const id = c.value;
+          const el = document.querySelector('input[name="amt_' + id + '"]');
+          if (el) el.value = val;
+        });
+      }
+    }
+    document.querySelectorAll('input[name="split_mode"]').forEach(function(r) {
+      r.addEventListener('change', updateInputs);
+    });
+    document.querySelectorAll('.member-check').forEach(function(c) {
+      c.addEventListener('change', updateInputs);
+    });
+    const amountEl = document.querySelector('input[name="amount"]');
+    if (amountEl) amountEl.addEventListener('input', updateInputs);
+    // initial
+    updateInputs();
+  });
+</script>
