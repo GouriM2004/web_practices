@@ -17,10 +17,10 @@ class Expense
      * $split_values for 'custom' should be associative [user_id => amount]
      * $shared_with is an indexed array of user ids to include in the split (for 'equal' it's used)
      */
-    public function addExpense($group_id, $title, $amount, $paid_by, $shared_with = [], $split_mode = 'equal', $split_values = null)
+    public function addExpense($group_id, $title, $amount, $paid_by, $shared_with = [], $split_mode = 'equal', $split_values = null, $category = null)
     {
-        $stmt = $this->db->prepare('INSERT INTO expenses (group_id, title, amount, paid_by) VALUES (?, ?, ?, ?)');
-        $stmt->bind_param('isdi', $group_id, $title, $amount, $paid_by);
+        $stmt = $this->db->prepare('INSERT INTO expenses (group_id, title, category, amount, paid_by) VALUES (?, ?, ?, ?, ?)');
+        $stmt->bind_param('issdi', $group_id, $title, $category, $amount, $paid_by);
         if (!$stmt->execute()) {
             $stmt->close();
             return false;
@@ -111,7 +111,8 @@ class Expense
                 $payerName = $r['name'] ?? '';
                 $stmt4->close();
             }
-            $msg = sprintf('New expense "%s" of ₹%s added by %s in group %d', $title, number_format($amount, 2), $payerName, $group_id);
+            $catText = $category ? ' (' . $category . ')' : '';
+            $msg = sprintf('New expense "%s"%s of ₹%s added by %s in group %d', $title, $catText, number_format($amount, 2), $payerName, $group_id);
             // add notifications
             if (!empty($notifUsers)) {
                 // lazy-load Notification via autoloader

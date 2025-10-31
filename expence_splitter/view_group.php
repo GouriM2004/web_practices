@@ -103,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   $title = trim($_POST['title'] ?? '');
   $amount = floatval($_POST['amount'] ?? 0);
   $paid_by = intval($_POST['paid_by'] ?? 0);
+  $category = trim($_POST['category'] ?? '');
   $shared_with = $_POST['shared_with'] ?? [];
   $split_mode = $_POST['split_mode'] ?? 'equal';
   $split_values = null;
@@ -128,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
   }
 
   if ($title && $amount > 0 && $paid_by > 0 && is_array($shared_with) && count($shared_with) > 0) {
-    $expenseModel->addExpense($group_id, $title, $amount, $paid_by, $shared_with, $split_mode, $split_values);
+    $expenseModel->addExpense($group_id, $title, $amount, $paid_by, $shared_with, $split_mode, $split_values, $category ?: null);
     header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Expense added'));
     exit;
   } else {
@@ -145,6 +146,100 @@ foreach ($balances as $b) {
     $allSettled = false;
     break;
   }
+}
+
+// --- Analytics: totals per user, monthly trend (last 6 months), category totals ---
+$db = Database::getConnection();
+
+// totals per user (only members) - include zeroes
+$userTotals = [];
+foreach ($members as $m) $userTotals[$m['id']] = 0.0;
+$stmt = $db->prepare('SELECT paid_by, SUM(amount) as total FROM expenses WHERE group_id = ? GROUP BY paid_by');
+if ($stmt) {
+  $stmt->bind_param('i', $group_id);
+  $stmt->execute();
+  $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+  $stmt->close();
+  foreach ($res as $r) {
+    $pid = intval($r['paid_by']);
+    $userTotals[$pid] = round((float)$r['total'], 2);
+  }
+}
+
+// monthly trend for last 6 months (YYYY-MM)
+$months = [];
+for ($i = 5; $i >= 0; $i--) {
+  $m = date('Y-m', strtotime("-{$i} months"));
+  $months[$m] = 0.0;
+}
+$stmt = $db->prepare("SELECT DATE_FORMAT(created_at, '%Y-%m') as ym, SUM(amount) as total FROM expenses WHERE group_id = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL 5 MONTH) GROUP BY ym ORDER BY ym");
+if ($stmt) {
+  $stmt->bind_param('i', $group_id);
+  $stmt->execute();
+  $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+  $stmt->close();
+  foreach ($res as $r) {
+    $ym = $r['ym'];
+    if (isset($months[$ym])) $months[$ym] = round((float)$r['total'], 2);
+  }
+}
+
+// category-wise totals
+$catTotals = [];
+$stmt = $db->prepare('SELECT COALESCE(category, \'Uncategorized\') as category, SUM(amount) as total FROM expenses WHERE group_id = ? GROUP BY category');
+if ($stmt) {
+  $stmt->bind_param('i', $group_id);
+  $stmt->execute();
+  $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+  $stmt->close();
+  foreach ($res as $r) {
+    $catTotals[$r['category']] = round((float)$r['total'], 2);
+  }
+}
+
+// summary insights for current user this month
+$userMonthTotal = 0.0;
+$userCat = [];
+$stmt = $db->prepare('SELECT SUM(amount) as total FROM expenses WHERE group_id = ? AND paid_by = ? AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())');
+if ($stmt) {
+  $stmt->bind_param('ii', $group_id, $user_id);
+  $stmt->execute();
+  $r = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  $userMonthTotal = round((float)($r['total'] ?? 0), 2);
+}
+$stmt = $db->prepare('SELECT COALESCE(category, \'Uncategorized\') as category, SUM(amount) as total FROM expenses WHERE group_id = ? AND paid_by = ? AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE()) GROUP BY category ORDER BY total DESC');
+if ($stmt) {
+  $stmt->bind_param('ii', $group_id, $user_id);
+  $stmt->execute();
+  $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+  $stmt->close();
+  foreach ($res as $r) $userCat[$r['category']] = round((float)$r['total'], 2);
+}
+
+// prepare JS data
+$userLabels = [];
+$userData = [];
+foreach ($members as $m) {
+  $userLabels[] = $m['name'];
+  $userData[] = $userTotals[$m['id']] ?? 0.0;
+}
+$monthLabels = array_keys($months);
+$monthData = array_values($months);
+$catLabels = array_keys($catTotals);
+$catData = array_values($catTotals);
+
+// build summary sentence
+$summaryText = '';
+if ($userMonthTotal > 0) {
+  // pick top 3 categories
+  $top = array_slice($userCat, 0, 3, true);
+  $pieces = [];
+  foreach ($top as $c => $amt) {
+    $pct = round(($amt / $userMonthTotal) * 100);
+    $pieces[] = "$pct% on $c";
+  }
+  $summaryText = sprintf('You spent ₹%s this month — %s.', number_format($userMonthTotal, 2), implode(', ', $pieces));
 }
 ?>
 <!doctype html>
@@ -199,10 +294,41 @@ foreach ($balances as $b) {
           </div>
         </div>
 
+        <div class="card mb-3">
+          <div class="card-body">
+            <h6>Spending Overview</h6>
+            <div style="height:260px;">
+              <canvas id="chartUsers"></canvas>
+              <div id="chartUsersEmpty" class="text-center text-muted" style="display:none;padding-top:60px;">No spending data to show</div>
+            </div>
+            <hr>
+            <div style="height:240px;">
+              <canvas id="chartMonths"></canvas>
+              <div id="chartMonthsEmpty" class="text-center text-muted" style="display:none;padding-top:60px;">No monthly data to show</div>
+            </div>
+            <hr>
+            <div style="height:240px;">
+              <canvas id="chartCategories"></canvas>
+              <div id="chartCategoriesEmpty" class="text-center text-muted" style="display:none;padding-top:60px;">No category data to show</div>
+            </div>
+          </div>
+        </div>
+
         <h6>Add Expense</h6>
         <form method="post" class="card card-body mb-4">
           <div class="mb-2"><input name="title" class="form-control" placeholder="Expense title"></div>
           <div class="mb-2"><input name="amount" type="number" step="0.01" class="form-control" placeholder="Amount"></div>
+          <div class="mb-2">
+            <label>Category (optional)</label>
+            <select name="category" class="form-select">
+              <option value="">Uncategorized</option>
+              <option value="Food">Food</option>
+              <option value="Travel">Travel</option>
+              <option value="Rent">Rent</option>
+              <option value="Utilities">Utilities</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
           <div class="mb-2">
             <label>Paid by</label>
             <select name="paid_by" class="form-select">
@@ -253,6 +379,14 @@ foreach ($balances as $b) {
       </div>
 
       <div class="col-md-5">
+        <?php if (!empty($summaryText)): ?>
+          <div class="card mb-3">
+            <div class="card-body">
+              <h6>Summary</h6>
+              <p class="mb-0"><?= htmlspecialchars($summaryText) ?></p>
+            </div>
+          </div>
+        <?php endif; ?>
         <div class="card mb-3">
           <div class="card-body">
             <h6>Members</h6>
@@ -400,4 +534,93 @@ foreach ($balances as $b) {
     // initial
     updateInputs();
   });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  // Chart data from server
+  const chartUserLabels = <?= json_encode($userLabels) ?>;
+  const chartUserData = <?= json_encode($userData) ?>;
+  const chartMonthLabels = <?= json_encode($monthLabels) ?>;
+  const chartMonthData = <?= json_encode($monthData) ?>;
+  const chartCatLabels = <?= json_encode($catLabels) ?>;
+  const chartCatData = <?= json_encode($catData) ?>;
+
+  function renderCharts() {
+    // Users bar chart
+    const ctxU = document.getElementById('chartUsers');
+    const usersSum = chartUserData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxU && chartUserLabels.length > 0 && usersSum > 0) {
+      new Chart(ctxU.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: chartUserLabels,
+          datasets: [{
+            label: 'Total spent',
+            data: chartUserData,
+            backgroundColor: 'rgba(54,162,235,0.6)'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false
+        }
+      });
+    } else if (document.getElementById('chartUsersEmpty')) {
+      document.getElementById('chartUsers').style.display = 'none';
+      document.getElementById('chartUsersEmpty').style.display = 'block';
+    }
+
+    // Monthly line chart
+    const ctxM = document.getElementById('chartMonths');
+    const monthsSum = chartMonthData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxM && chartMonthLabels.length > 0 && monthsSum > 0) {
+      new Chart(ctxM.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: chartMonthLabels,
+          datasets: [{
+            label: 'Monthly spending',
+            data: chartMonthData,
+            borderColor: 'rgba(75,192,192,1)',
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false
+        }
+      });
+    } else if (document.getElementById('chartMonthsEmpty')) {
+      document.getElementById('chartMonths').style.display = 'none';
+      document.getElementById('chartMonthsEmpty').style.display = 'block';
+    }
+
+    // Category pie chart
+    const ctxC = document.getElementById('chartCategories');
+    const catsSum = chartCatData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxC && chartCatLabels.length > 0 && catsSum > 0) {
+      // generate colors if needed
+      const colors = chartCatLabels.map((_, i) => ['#ff6384', '#36a2eb', '#ffcd56', '#4bc0c0', '#9966ff'][i % 5]);
+      new Chart(ctxC.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels: chartCatLabels,
+          datasets: [{
+            data: chartCatData,
+            backgroundColor: colors
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false
+        }
+      });
+    } else if (document.getElementById('chartCategoriesEmpty')) {
+      document.getElementById('chartCategories').style.display = 'none';
+      document.getElementById('chartCategoriesEmpty').style.display = 'block';
+    }
+  }
+
+  // Render after DOM ready
+  document.addEventListener('DOMContentLoaded', renderCharts);
 </script>
