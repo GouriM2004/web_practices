@@ -18,6 +18,9 @@ $expenses = $expenseModel->getGroupExpenses($group_id);
 // Handle delete group (only creator allowed)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_group'])) {
   if ($groupModel->delete($group_id, $user_id)) {
+    // log deletion
+    $lg = new Log();
+    $lg->add($user_id, $group_id, 'Deleted the group');
     header('Location: dashboard.php?msg=' . urlencode('Group deleted'));
     exit;
   } else {
@@ -57,6 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['remove_member'])) {
       }
       $message = sprintf('%s %s the group %s', $tname, $actor, $group['name']);
       if (!empty($uids)) $notif->addNotifications($uids, $message, $group_id);
+      // log activity
+      $lg = new Log();
+      $lg->add($user_id, $group_id, sprintf('User %d %s the group', $target, ($user_id == $target ? 'left' : 'was removed from')));
 
       header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Member removed'));
       exit;

@@ -10,6 +10,7 @@ class Settlement
         $this->db = Database::getConnection();
     }
 
+
     public function addSettlement($group_id, $payer_id, $receiver_id, $amount)
     {
         $stmt = $this->db->prepare('INSERT INTO settlements (group_id, payer_id, receiver_id, amount) VALUES (?, ?, ?, ?)');
@@ -17,7 +18,13 @@ class Settlement
         $stmt->bind_param('iiid', $group_id, $payer_id, $receiver_id, $amount);
         $res = $stmt->execute();
         $stmt->close();
-        return $res ? $this->db->insert_id : false;
+        $id = $res ? $this->db->insert_id : false;
+        if ($id) {
+            // log activity
+            $log = new Log();
+            $log->add($payer_id, $group_id, sprintf('Settled ₹%s to user %d', number_format($amount, 2), $receiver_id));
+        }
+        return $id;
     }
 
     public function getGroupSettlements($group_id)

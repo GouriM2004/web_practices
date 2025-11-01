@@ -128,6 +128,9 @@ class Expense
                     }
                 }
             }
+            // add activity log
+            $log = new Log();
+            $log->add($paid_by, $group_id, sprintf('Added expense "%s"%s of ₹%s', $title, $catText, number_format($amount, 2)));
         }
 
         return $expense_id;
