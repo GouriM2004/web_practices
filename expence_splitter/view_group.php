@@ -265,6 +265,9 @@ if ($userMonthTotal > 0) {
     <?php if (isset($_GET['msg'])): ?>
       <div class="alert alert-success"><?= htmlspecialchars($_GET['msg']) ?></div>
     <?php endif; ?>
+    <?php if (isset($_GET['report_err'])): ?>
+      <div class="alert alert-danger"><?= htmlspecialchars($_GET['report_err']) ?></div>
+    <?php endif; ?>
     <?php if (isset($err)): ?><div class="alert alert-danger"><?= htmlspecialchars($err) ?></div><?php endif; ?>
 
     <div class="row">
@@ -483,6 +486,24 @@ if ($userMonthTotal > 0) {
             </form>
             <?php if (isset($group['created_by']) && $group['created_by'] == $user_id): ?>
               <hr>
+              <div class="mb-3">
+                <h6>Export / Reports</h6>
+                <form method="post" action="export_group.php" class="d-flex gap-2" target="download_frame">
+                  <input type="hidden" name="group_id" value="<?= $group_id ?>">
+                  <button name="export_excel" type="submit" class="btn btn-outline-secondary" onclick="(function(f){f.type.value='excel'})(this.form);">Export Excel</button>
+                  <button name="export_pdf" type="submit" class="btn btn-outline-secondary" onclick="(function(f){f.type.value='pdf'})(this.form);">Export PDF</button>
+                  <input type="hidden" name="type" value="excel">
+                </form>
+                <iframe name="download_frame" style="display:none;"></iframe>
+                <?php if (!empty($_GET['report_token'])): ?>
+                  <div class="mt-2">
+                    <label class="form-label">Shareable link</label>
+                    <div><a href="report.php?token=<?= htmlspecialchars($_GET['report_token']) ?>" target="_blank"><?= (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['REQUEST_URI']) . '/report.php?token=' . htmlspecialchars($_GET['report_token']) ?></a></div>
+                    <small class="text-muted">This link allows download without signing in (if your server is reachable). You can revoke by deleting the file or adding expiry later.</small>
+                  </div>
+                <?php endif; ?>
+              </div>
+
               <form method="post" onsubmit="return confirm('Are you sure? Deleting the group will remove all expenses and membership records.');">
                 <input type="hidden" name="group_id" value="<?= $group_id ?>">
                 <button name="delete_group" class="btn btn-danger w-100">Delete Group</button>

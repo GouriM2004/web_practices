@@ -62,7 +62,6 @@ CREATE TABLE IF NOT EXISTS settlements (
   FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Notifications table for in-app notices (and optional email)
 CREATE TABLE IF NOT EXISTS notifications (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
@@ -74,7 +73,20 @@ CREATE TABLE IF NOT EXISTS notifications (
   FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE
 );
 
--- Logs / Activity feed
+/* ----------------------------- reports ----------------------------- */
+CREATE TABLE `reports` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `group_id` INT NOT NULL,
+  `created_by` INT NOT NULL,
+  `type` VARCHAR(10) NOT NULL, -- 'excel' or 'pdf'
+  `file_path` VARCHAR(255) NOT NULL,
+  `token` VARCHAR(64) NOT NULL UNIQUE,
+  `expires_at` DATETIME NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_reports_group` (`group_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT,
