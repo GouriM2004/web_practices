@@ -145,4 +145,66 @@ class Expense
         $stmt->close();
         return $res;
     }
+
+    /**
+     * Return top frequent payers and contributors for a group.
+     * Returns array of rows: [paid_by, name, count, total]
+     */
+    public function getFrequentPayers($group_id, $limit = 3)
+    {
+        $stmt = $this->db->prepare('SELECT e.paid_by, u.name, COUNT(*) AS cnt, SUM(e.amount) AS total FROM expenses e LEFT JOIN users u ON e.paid_by = u.id WHERE e.group_id = ? GROUP BY e.paid_by ORDER BY cnt DESC, total DESC LIMIT ?');
+        $stmt->bind_param('ii', $group_id, $limit);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $res;
+    }
+
+    /**
+     * Analyze recent expenses to suggest a split pattern.
+     * Heuristic: look at last $lookback expenses, for those with >1 share, check if shares are nearly equal.
+     * If >=60% of considered expenses are equal-split, suggest 'equal', else suggest 'custom'.
+     */
+    public function getSplitPatternSuggestion($group_id, $lookback = 30)
+    {
+        // fetch recent expense ids
+        $stmt = $this->db->prepare('SELECT id FROM expenses WHERE group_id = ? ORDER BY created_at DESC LIMIT ?');
+        $stmt->bind_param('ii', $group_id, $lookback);
+        $stmt->execute();
+        $ids = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        $total = 0;
+        $equalCount = 0;
+
+        foreach ($ids as $row) {
+            $eid = intval($row['id']);
+            $s = $this->db->prepare('SELECT share_amount FROM expense_shares WHERE expense_id = ?');
+            $s->bind_param('i', $eid);
+            $s->execute();
+            $shares = $s->get_result()->fetch_all(MYSQLI_ASSOC);
+            $s->close();
+            if (count($shares) <= 1) continue; // not a split
+            $total++;
+            $vals = array_map(function ($r) {
+                return floatval($r['share_amount']);
+            }, $shares);
+            // compare min and max within small tolerance
+            $min = min($vals);
+            $max = max($vals);
+            if ($min == 0) continue;
+            if (($max - $min) / $min <= 0.05) { // within 5% -> equal
+                $equalCount++;
+            }
+        }
+
+        if ($total === 0) {
+            return ['suggestion' => 'none', 'score' => 0, 'considered' => $total];
+        }
+        $ratio = $equalCount / $total;
+        if ($ratio >= 0.6) {
+            return ['suggestion' => 'equal', 'score' => $ratio, 'considered' => $total];
+        }
+        return ['suggestion' => 'custom', 'score' => $ratio, 'considered' => $total];
+    }
 }

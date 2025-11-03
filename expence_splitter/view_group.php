@@ -14,6 +14,9 @@ $group = $groupModel->getGroup($group_id, $user_id);
 if (!$group) header('Location: dashboard.php?msg=' . urlencode('You are not a member of this group'));
 $members = $groupModel->getMembers($group_id);
 $expenses = $expenseModel->getGroupExpenses($group_id);
+// Smart suggestions: frequent payers and split pattern
+$frequentPayers = $expenseModel->getFrequentPayers($group_id, 3);
+$splitSuggestion = $expenseModel->getSplitPatternSuggestion($group_id, 30);
 
 // Handle delete group (only creator allowed)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_group'])) {
@@ -322,6 +325,32 @@ if ($userMonthTotal > 0) {
             </div>
           </div>
         </div>
+        <h6>Smart suggestions</h6>
+        <div class="card mb-3">
+          <div class="card-body">
+            <?php if (!empty($frequentPayers)): ?>
+              <p class="mb-1"><strong>Frequent payer:</strong> <?= htmlspecialchars($frequentPayers[0]['name']) ?> (<?= intval($frequentPayers[0]['cnt']) ?> expenses)</p>
+              <?php if (count($frequentPayers) > 1): ?>
+                <p class="mb-0 small text-muted">Also: <?php
+                                                        $others = array_slice($frequentPayers, 1);
+                                                        $names = array_map(function ($r) {
+                                                          return htmlspecialchars($r['name']) . ' (' . $r['cnt'] . ')';
+                                                        }, $others);
+                                                        echo implode(', ', $names);
+                                                        ?></p>
+              <?php endif; ?>
+            <?php else: ?>
+              <p class="text-muted">No payer history yet.</p>
+            <?php endif; ?>
+            <hr>
+            <?php if ($splitSuggestion['suggestion'] !== 'none'): ?>
+              <p class="mb-1"><strong>Suggested split:</strong> <?= ($splitSuggestion['suggestion'] === 'equal' ? 'Equal split' : 'Custom split') ?> (based on <?= intval($splitSuggestion['considered']) ?> recent splits)</p>
+              <button id="applySuggestionBtn" class="btn btn-sm btn-outline-primary">Apply suggestion</button>
+            <?php else: ?>
+              <p class="text-muted mb-0">Not enough split history to suggest a pattern.</p>
+            <?php endif; ?>
+          </div>
+        </div>
 
         <h6>Add Expense</h6>
         <form method="post" class="card card-body mb-4">
@@ -560,6 +589,33 @@ if ($userMonthTotal > 0) {
     if (amountEl) amountEl.addEventListener('input', updateInputs);
     // initial
     updateInputs();
+    // Smart suggestion apply handler
+    const applyBtn = document.getElementById('applySuggestionBtn');
+    if (applyBtn) {
+      applyBtn.addEventListener('click', function() {
+        // suggested payer from server
+        const suggestedPayer = <?= json_encode($frequentPayers[0]['paid_by'] ?? null) ?>;
+        const suggestedSplit = <?= json_encode($splitSuggestion['suggestion'] ?? 'none') ?>;
+        // set payer if available
+        if (suggestedPayer) {
+          const paidByEl = document.querySelector('select[name="paid_by"]');
+          if (paidByEl) paidByEl.value = suggestedPayer;
+        }
+        // set split mode
+        if (suggestedSplit === 'equal') {
+          const el = document.getElementById('split_equal');
+          if (el) el.checked = true;
+        } else if (suggestedSplit === 'custom') {
+          const el = document.getElementById('split_custom');
+          if (el) el.checked = true;
+        }
+        // check all members and update inputs
+        document.querySelectorAll('.member-check').forEach(function(c) {
+          c.checked = true;
+        });
+        updateInputs();
+      });
+    }
   });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
