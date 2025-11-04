@@ -108,43 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_settled'])) {
   }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_expense'])) {
-  $title = trim($_POST['title'] ?? '');
-  $amount = floatval($_POST['amount'] ?? 0);
-  $paid_by = intval($_POST['paid_by'] ?? 0);
-  $category = trim($_POST['category'] ?? '');
-  $shared_with = $_POST['shared_with'] ?? [];
-  $split_mode = $_POST['split_mode'] ?? 'equal';
-  $split_values = null;
-
-  if ($split_mode === 'percentage') {
-    $split_values = [];
-    foreach ($members as $m) {
-      $id = $m['id'];
-      if (in_array($id, $shared_with)) {
-        $pct = floatval($_POST['pct_' . $id] ?? 0);
-        $split_values[$id] = $pct;
-      }
-    }
-  } elseif ($split_mode === 'custom') {
-    $split_values = [];
-    foreach ($members as $m) {
-      $id = $m['id'];
-      if (in_array($id, $shared_with)) {
-        $amt_val = floatval($_POST['amt_' . $id] ?? 0);
-        $split_values[$id] = $amt_val;
-      }
-    }
-  }
-
-  if ($title && $amount > 0 && $paid_by > 0 && is_array($shared_with) && count($shared_with) > 0) {
-    $expenseModel->addExpense($group_id, $title, $amount, $paid_by, $shared_with, $split_mode, $split_values, $category ?: null);
-    header('Location: view_group.php?id=' . $group_id . '&msg=' . urlencode('Expense added'));
-    exit;
-  } else {
-    $err = 'Fill valid expense details';
-  }
-}
+// NOTE: Expense creation is handled via AJAX endpoints (api/add_expense.php). The old
+// server-side POST handler was removed to avoid duplicate processing and page reloads.
 
 $balances = $calculator->computeBalances($group_id);
 $settlements = $calculator->settleBalances($balances);
@@ -291,7 +256,7 @@ if ($userMonthTotal > 0) {
                     <th>Date</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="expensesTbody">
                   <?php foreach ($expenses as $e): ?>
                     <tr>
                       <td><?= htmlspecialchars($e['title']) ?></td>
@@ -353,7 +318,7 @@ if ($userMonthTotal > 0) {
         </div>
 
         <h6>Add Expense</h6>
-        <form method="post" class="card card-body mb-4">
+        <form id="addExpenseForm" class="card card-body mb-4">
           <div class="mb-2"><input name="title" class="form-control" placeholder="Expense title"></div>
           <div class="mb-2"><input name="amount" type="number" step="0.01" class="form-control" placeholder="Amount"></div>
           <div class="mb-2">
@@ -412,7 +377,7 @@ if ($userMonthTotal > 0) {
             <small class="text-muted">Choose who participates and pick a split mode. For percentage/custom, fill values for selected members.</small>
           </div>
 
-          <button name="add_expense" class="btn btn-primary">Add Expense</button>
+          <button id="addExpenseBtn" type="button" class="btn btn-primary">Add Expense</button>
         </form>
       </div>
 
@@ -438,7 +403,7 @@ if ($userMonthTotal > 0) {
                     <?php endif; ?>
                   </div>
                   <div class="d-flex align-items-center">
-                    <span class="badge bg-secondary me-2">₹<?= number_format($balances[$m['id']] ?? 0, 2) ?></span>
+                    <span class="badge bg-secondary me-2 balance-badge" data-user-id="<?= $m['id'] ?>">₹<?= number_format($balances[$m['id']] ?? 0, 2) ?></span>
                     <?php // Show remove button to creator for other members, or show "Leave" to non-creator members 
                     ?>
                     <?php if ($user_id == $group['created_by'] && $m['id'] != $group['created_by']): ?>
@@ -620,6 +585,11 @@ if ($userMonthTotal > 0) {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+  // Hold chart instances for updates
+  let chartUsersInstance = null;
+  let chartMonthsInstance = null;
+  let chartCategoriesInstance = null;
+  const groupId = <?= json_encode($group_id) ?>;
   // Chart data from server
   const chartUserLabels = <?= json_encode($userLabels) ?>;
   const chartUserData = <?= json_encode($userData) ?>;
@@ -628,18 +598,21 @@ if ($userMonthTotal > 0) {
   const chartCatLabels = <?= json_encode($catLabels) ?>;
   const chartCatData = <?= json_encode($catData) ?>;
 
-  function renderCharts() {
+  function renderCharts(data) {
     // Users bar chart
     const ctxU = document.getElementById('chartUsers');
-    const usersSum = chartUserData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
-    if (ctxU && chartUserLabels.length > 0 && usersSum > 0) {
-      new Chart(ctxU.getContext('2d'), {
+    const labelsU = data ? data.userTotalsLabels : chartUserLabels;
+    const dataU = data ? data.userTotalsData : chartUserData;
+    const usersSum = dataU.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxU && labelsU.length > 0 && usersSum > 0) {
+      if (chartUsersInstance) chartUsersInstance.destroy();
+      chartUsersInstance = new Chart(ctxU.getContext('2d'), {
         type: 'bar',
         data: {
-          labels: chartUserLabels,
+          labels: labelsU,
           datasets: [{
             label: 'Total spent',
-            data: chartUserData,
+            data: dataU,
             backgroundColor: 'rgba(54,162,235,0.6)'
           }]
         },
@@ -648,6 +621,8 @@ if ($userMonthTotal > 0) {
           maintainAspectRatio: false
         }
       });
+      document.getElementById('chartUsers').style.display = '';
+      if (document.getElementById('chartUsersEmpty')) document.getElementById('chartUsersEmpty').style.display = 'none';
     } else if (document.getElementById('chartUsersEmpty')) {
       document.getElementById('chartUsers').style.display = 'none';
       document.getElementById('chartUsersEmpty').style.display = 'block';
@@ -655,15 +630,18 @@ if ($userMonthTotal > 0) {
 
     // Monthly line chart
     const ctxM = document.getElementById('chartMonths');
-    const monthsSum = chartMonthData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
-    if (ctxM && chartMonthLabels.length > 0 && monthsSum > 0) {
-      new Chart(ctxM.getContext('2d'), {
+    const labelsM = data ? data.monthLabels : chartMonthLabels;
+    const dataM = data ? data.monthData : chartMonthData;
+    const monthsSum = dataM.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxM && labelsM.length > 0 && monthsSum > 0) {
+      if (chartMonthsInstance) chartMonthsInstance.destroy();
+      chartMonthsInstance = new Chart(ctxM.getContext('2d'), {
         type: 'line',
         data: {
-          labels: chartMonthLabels,
+          labels: labelsM,
           datasets: [{
             label: 'Monthly spending',
-            data: chartMonthData,
+            data: dataM,
             borderColor: 'rgba(75,192,192,1)',
             fill: false
           }]
@@ -673,6 +651,8 @@ if ($userMonthTotal > 0) {
           maintainAspectRatio: false
         }
       });
+      document.getElementById('chartMonths').style.display = '';
+      if (document.getElementById('chartMonthsEmpty')) document.getElementById('chartMonthsEmpty').style.display = 'none';
     } else if (document.getElementById('chartMonthsEmpty')) {
       document.getElementById('chartMonths').style.display = 'none';
       document.getElementById('chartMonthsEmpty').style.display = 'block';
@@ -680,16 +660,18 @@ if ($userMonthTotal > 0) {
 
     // Category pie chart
     const ctxC = document.getElementById('chartCategories');
-    const catsSum = chartCatData.reduce((s, v) => s + (parseFloat(v) || 0), 0);
-    if (ctxC && chartCatLabels.length > 0 && catsSum > 0) {
-      // generate colors if needed
-      const colors = chartCatLabels.map((_, i) => ['#ff6384', '#36a2eb', '#ffcd56', '#4bc0c0', '#9966ff'][i % 5]);
-      new Chart(ctxC.getContext('2d'), {
+    const labelsC = data ? data.catLabels : chartCatLabels;
+    const dataC = data ? data.catData : chartCatData;
+    const catsSum = dataC.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    if (ctxC && labelsC.length > 0 && catsSum > 0) {
+      const colors = labelsC.map((_, i) => ['#ff6384', '#36a2eb', '#ffcd56', '#4bc0c0', '#9966ff'][i % 5]);
+      if (chartCategoriesInstance) chartCategoriesInstance.destroy();
+      chartCategoriesInstance = new Chart(ctxC.getContext('2d'), {
         type: 'pie',
         data: {
-          labels: chartCatLabels,
+          labels: labelsC,
           datasets: [{
-            data: chartCatData,
+            data: dataC,
             backgroundColor: colors
           }]
         },
@@ -698,12 +680,92 @@ if ($userMonthTotal > 0) {
           maintainAspectRatio: false
         }
       });
+      document.getElementById('chartCategories').style.display = '';
+      if (document.getElementById('chartCategoriesEmpty')) document.getElementById('chartCategoriesEmpty').style.display = 'none';
     } else if (document.getElementById('chartCategoriesEmpty')) {
       document.getElementById('chartCategories').style.display = 'none';
       document.getElementById('chartCategoriesEmpty').style.display = 'block';
     }
   }
-
   // Render after DOM ready
-  document.addEventListener('DOMContentLoaded', renderCharts);
+  document.addEventListener('DOMContentLoaded', function() {
+    renderCharts();
+    initAjax();
+  });
+
+  // Update DOM elements (balances, expenses table, summary) from AJAX data
+  function updateFromData(response) {
+    if (!response) return;
+    // update expenses table
+    if (response.expenses_html !== undefined) {
+      const tbody = document.getElementById('expensesTbody');
+      if (tbody) tbody.innerHTML = response.expenses_html;
+    }
+    // update balances badges
+    if (response.balances) {
+      document.querySelectorAll('.balance-badge').forEach(function(el) {
+        const uid = el.getAttribute('data-user-id');
+        if (uid && response.balances[uid] !== undefined) {
+          el.innerText = '₹' + parseFloat(response.balances[uid]).toFixed(2);
+        }
+      });
+    }
+    // update summary text if present
+    if (response.summaryText !== undefined) {
+      const el = document.querySelector('.card .card-body p.mb-0');
+      if (el) el.innerText = response.summaryText;
+    }
+    // update charts using explicit arrays returned by API
+    renderCharts({
+      userTotalsLabels: response.userTotalsLabels || Object.keys(response.userTotals || {}),
+      userTotalsData: response.userTotalsData || Object.values(response.userTotals || {}),
+      monthLabels: response.months ? response.months.labels : [],
+      monthData: response.months ? response.months.data : [],
+      catLabels: response.categories ? response.categories.labels : [],
+      catData: response.categories ? response.categories.data : []
+    });
+  }
+
+  // Initialize AJAX hooks: add-expense submit and periodic refresh
+  function initAjax() {
+    const form = document.getElementById('addExpenseForm');
+    const btn = document.getElementById('addExpenseBtn');
+    if (btn && form) {
+      btn.addEventListener('click', function() {
+        const fd = new FormData(form);
+        fd.append('group_id', groupId);
+        // collect selected shared_with checkboxes (they are part of form if checked)
+        fetch('api/add_expense.php', {
+            method: 'POST',
+            body: fd,
+            credentials: 'same-origin'
+          })
+          .then(r => r.json())
+          .then(resp => {
+            if (resp.success) {
+              updateFromData(resp);
+              // clear title and amount
+              form.querySelector('input[name="title"]').value = '';
+              form.querySelector('input[name="amount"]').value = '';
+            } else {
+              alert(resp.error || 'Failed to add expense');
+            }
+          }).catch(err => {
+            console.error(err);
+            alert('Network error');
+          });
+      });
+    }
+    // periodic refresh every 20 seconds
+    setInterval(function() {
+      fetch('api/group_data.php?group_id=' + encodeURIComponent(groupId), {
+          credentials: 'same-origin'
+        })
+        .then(r => r.json())
+        .then(resp => {
+          if (resp.success) updateFromData(resp);
+        })
+        .catch(e => console.warn('Group data refresh failed', e));
+    }, 20000);
+  }
 </script>
