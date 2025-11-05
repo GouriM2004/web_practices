@@ -96,3 +96,30 @@ CREATE TABLE IF NOT EXISTS logs (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE
 );
+
+/* ----------------------------- expense_payments ----------------------------- */
+CREATE TABLE IF NOT EXISTS expense_payments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  expense_id INT NOT NULL,
+  payer_id INT NOT NULL,
+  receiver_id INT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
+  FOREIGN KEY (payer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+/* ----------------------------- recurring expenses fields ----------------------------- */
+-- Add currency and recurring metadata to expenses
+ALTER TABLE expenses
+  ADD COLUMN IF NOT EXISTS currency VARCHAR(3) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS is_recurring TINYINT(1) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS next_run DATE DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS recurring_until DATE DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS recurring_source_id INT DEFAULT NULL;
+
+-- Add role to group_members (owner/member/viewer)
+ALTER TABLE group_members
+  ADD COLUMN IF NOT EXISTS role ENUM('owner','member','viewer') NOT NULL DEFAULT 'member';

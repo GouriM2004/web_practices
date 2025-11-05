@@ -44,7 +44,23 @@ class Calculator
                 if (isset($balances[$uid])) $balances[$uid] -= $share;
             }
         }
-        // Apply recorded settlements: payer -> receiver reduces receiver and increases payer
+        // Apply expense-level payments (partial payments recorded against specific expenses)
+        $stmtPay = $this->db->prepare('SELECT ep.payer_id, ep.receiver_id, ep.amount FROM expense_payments ep JOIN expenses e ON ep.expense_id = e.id WHERE e.group_id = ?');
+        if ($stmtPay) {
+            $stmtPay->bind_param('i', $group_id);
+            $stmtPay->execute();
+            $payments = $stmtPay->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmtPay->close();
+            foreach ($payments as $pmt) {
+                $p = intval($pmt['payer_id']);
+                $r = intval($pmt['receiver_id']);
+                $a = (float)$pmt['amount'];
+                if (isset($balances[$p])) $balances[$p] += $a; // payer paid some of their debt
+                if (isset($balances[$r])) $balances[$r] -= $a; // receiver received money
+            }
+        }
+
+        // Apply recorded settlements (group-level settlements)
         $stmt3 = $this->db->prepare('SELECT payer_id, receiver_id, amount FROM settlements WHERE group_id = ?');
         if ($stmt3) {
             $stmt3->bind_param('i', $group_id);
@@ -62,6 +78,60 @@ class Calculator
 
         foreach ($balances as $k => $v) $balances[$k] = round($v, 2);
         return $balances;
+    }
+
+    /**
+     * Return components of a user's balance: total paid, total share owed, payments made/received
+     */
+    public function getUserBalanceComponents($group_id, $user_id)
+    {
+        $components = [
+            'total_paid' => 0.0,
+            'total_share' => 0.0,
+            'payments_made' => 0.0,
+            'payments_received' => 0.0,
+            'net' => 0.0,
+        ];
+        // total paid by user (expenses they paid)
+        $stmt = $this->db->prepare('SELECT SUM(amount) as s FROM expenses WHERE group_id = ? AND paid_by = ?');
+        $stmt->bind_param('ii', $group_id, $user_id);
+        $stmt->execute();
+        $r = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $components['total_paid'] = (float)($r['s'] ?? 0);
+
+        // total share owed by user across expense_shares
+        $stmt2 = $this->db->prepare('SELECT SUM(share_amount) as s FROM expense_shares es JOIN expenses e ON es.expense_id = e.id WHERE e.group_id = ? AND es.user_id = ?');
+        $stmt2->bind_param('ii', $group_id, $user_id);
+        $stmt2->execute();
+        $r2 = $stmt2->get_result()->fetch_assoc();
+        $stmt2->close();
+        $components['total_share'] = (float)($r2['s'] ?? 0);
+
+        // payments made (expense_payments where user is payer)
+        $stmt3 = $this->db->prepare('SELECT SUM(ep.amount) as s FROM expense_payments ep JOIN expenses e ON ep.expense_id = e.id WHERE e.group_id = ? AND ep.payer_id = ?');
+        $stmt3->bind_param('ii', $group_id, $user_id);
+        $stmt3->execute();
+        $r3 = $stmt3->get_result()->fetch_assoc();
+        $stmt3->close();
+        $components['payments_made'] = (float)($r3['s'] ?? 0);
+
+        // payments received
+        $stmt4 = $this->db->prepare('SELECT SUM(ep.amount) as s FROM expense_payments ep JOIN expenses e ON ep.expense_id = e.id WHERE e.group_id = ? AND ep.receiver_id = ?');
+        $stmt4->bind_param('ii', $group_id, $user_id);
+        $stmt4->execute();
+        $r4 = $stmt4->get_result()->fetch_assoc();
+        $stmt4->close();
+        $components['payments_received'] = (float)($r4['s'] ?? 0);
+
+        $components['net'] = round($components['total_paid'] - $components['total_share'] + $components['payments_made'] - $components['payments_received'], 2);
+        return $components;
+    }
+
+    // alias for settleBalances to make intent clearer
+    public function simplifyDebts($balances)
+    {
+        return $this->settleBalances($balances);
     }
 
     public function settleBalances($balances)
