@@ -34,6 +34,12 @@ $notif->addNotifications([$receiver_id], $msg, $group_id);
 $log = new Log();
 $log->add($user_id, $group_id, sprintf('Recorded payment of %s for expense #%d to user %d', number_format($amount, 2), $expense_id, $receiver_id));
 
+// award 'first_settle' achievement if applicable
+$ach = new Achievement();
+if (!$ach->hasAchievement('first_settle', $user_id, $group_id)) {
+    $ach->award('first_settle', $user_id, $group_id, ['expense_id' => $expense_id, 'amount' => $amount]);
+}
+
 // return updated balances and simplified transactions
 $calculator = new Calculator();
 $balances = $calculator->computeBalances($group_id);

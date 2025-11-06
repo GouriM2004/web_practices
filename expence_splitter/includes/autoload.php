@@ -10,6 +10,7 @@ spl_autoload_register(function ($class) {
         'Notification' => __DIR__ . '/Models/Notification.php',
         'Report' => __DIR__ . '/Models/Report.php',
         'Log' => __DIR__ . '/Models/Log.php',
+        'Achievement' => __DIR__ . '/Models/Achievement.php',
         'Database' => __DIR__ . '/Database.php',
         'Config' => __DIR__ . '/Config.php',
         'Calculator' => __DIR__ . '/Helpers/Calculator.php',

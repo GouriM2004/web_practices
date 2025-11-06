@@ -97,6 +97,28 @@ CREATE TABLE IF NOT EXISTS logs (
   FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE
 );
 
+/* ----------------------------- achievements ----------------------------- */
+CREATE TABLE IF NOT EXISTS achievements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(150) NOT NULL,
+  description TEXT DEFAULT NULL,
+  points INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_achievements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  achievement_id INT NOT NULL,
+  user_id INT NOT NULL,
+  group_id INT DEFAULT NULL,
+  meta JSON DEFAULT NULL,
+  awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (achievement_id) REFERENCES achievements(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE
+);
+
 /* ----------------------------- expense_payments ----------------------------- */
 CREATE TABLE IF NOT EXISTS expense_payments (
   id INT AUTO_INCREMENT PRIMARY KEY,

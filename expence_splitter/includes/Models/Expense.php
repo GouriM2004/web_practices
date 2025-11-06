@@ -131,6 +131,12 @@ class Expense
             // add activity log
             $log = new Log();
             $log->add($paid_by, $group_id, sprintf('Added expense "%s"%s of ₹%s', $title, $catText, number_format($amount, 2)));
+
+            // award first_expense achievement to payer if not already awarded in this group
+            $ach = new Achievement();
+            if (!$ach->hasAchievement('first_expense', $paid_by, $group_id)) {
+                $ach->award('first_expense', $paid_by, $group_id, ['expense_id' => $expense_id, 'amount' => $amount]);
+            }
         }
 
         return $expense_id;
