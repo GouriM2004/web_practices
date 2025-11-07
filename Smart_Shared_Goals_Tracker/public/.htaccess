@@ -1,0 +1,8 @@
+# Ensure index.php is the directory index and provide a fallback to index.php
+DirectoryIndex index.php
+
+RewriteEngine On
+# If the requested resource is not a file or directory, rewrite to index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]

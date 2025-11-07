@@ -1,0 +1,6 @@
+# Redirect direct folder access to the public/ folder where index.php lives
+RewriteEngine On
+RewriteRule ^$ public/ [L,R=302]
+# Optional: redirect any direct access to project root to public/
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteRule ^(.*)$ public/$1 [L]
