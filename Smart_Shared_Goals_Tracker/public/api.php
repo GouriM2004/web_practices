@@ -65,6 +65,34 @@ if ($method === 'POST' && preg_match('#^register$#', $path)) {
     $stmt = $pdo->prepare('INSERT INTO users (name, email, password) VALUES (?, ?, ?)');
     $stmt->execute([$data['name'], $data['email'], $hash]);
     $id = $pdo->lastInsertId();
+    // After creating a user, check for any pending invites to groups and accept them automatically
+    try {
+        $stmtInv = $pdo->prepare('SELECT id, group_id, role FROM group_invites WHERE email = ? AND accepted_by IS NULL');
+        $stmtInv->execute([$data['email']]);
+        $invites = $stmtInv->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($invites as $inv) {
+            // add membership if not already present
+            $stmtChk = $pdo->prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtChk->execute([$inv['group_id'], $id]);
+            if (!$stmtChk->fetchColumn()) {
+                $stmtIns = $pdo->prepare('INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)');
+                $stmtIns->execute([$inv['group_id'], $id, $inv['role']]);
+            }
+            // mark invite accepted
+            $stmtUpd = $pdo->prepare('UPDATE group_invites SET accepted_by = ?, accepted_at = NOW() WHERE id = ?');
+            $stmtUpd->execute([$id, $inv['id']]);
+            // log activity
+            try {
+                $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+                $stmtAct->execute([$id, $inv['group_id'], 'invite_accepted', json_encode(['invite_id' => (int)$inv['id']])]);
+            } catch (Exception $e) {
+                // ignore activity logging errors
+            }
+        }
+    } catch (Exception $e) {
+        // ignore invite processing errors for now
+    }
+
     jsonOk(['user_id' => (int)$id]);
     exit;
 }
@@ -281,6 +309,28 @@ if ($method === 'GET' && preg_match('#^me$#', $path)) {
     exit;
 }
 
+// GET /api/users -> find user by email (query param: email)
+if ($method === 'GET' && preg_match('#^users$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $q = $_GET['email'] ?? null;
+    if (!$q) {
+        jsonErr('Missing email', 422);
+        exit;
+    }
+    $stmt = $pdo->prepare('SELECT id, name, email FROM users WHERE email = ?');
+    $stmt->execute([$q]);
+    $u = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$u) {
+        jsonErr('User not found', 404);
+        exit;
+    }
+    jsonOk(['user' => $u]);
+    exit;
+}
+
 // POST /api/logout -> clear session
 if ($method === 'POST' && preg_match('#^logout$#', $path)) {
     if (session_status() === PHP_SESSION_ACTIVE) {
@@ -406,6 +456,179 @@ if ($method === 'POST' && preg_match('#^groups/(\d+)/join$#', $path, $m)) {
         exit;
     } catch (Exception $e) {
         jsonErr('Error joining group: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// POST /api/groups/{id}/members -> add member by email (owner/admin only)
+if ($method === 'POST' && preg_match('#^groups/(\d+)/members$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $email = trim($data['email'] ?? '');
+    $role = in_array($data['role'] ?? 'member', ['member', 'admin']) ? $data['role'] : 'member';
+    if (!$email) {
+        jsonErr('Missing email', 422);
+        exit;
+    }
+
+    try {
+        // check group exists
+        $stmt = $pdo->prepare('SELECT id FROM groups_tbl WHERE id = ?');
+        $stmt->execute([$gid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Group not found', 404);
+            exit;
+        }
+
+        // ensure current user is owner or admin in group
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $_SESSION['user_id']]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden: only owner/admin can add members', 403);
+            exit;
+        }
+
+        // find user by email
+        $stmtU = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        $stmtU->execute([$email]);
+        $uid = $stmtU->fetchColumn();
+        if (!$uid) {
+            jsonErr('User not found', 404);
+            exit;
+        }
+
+        // check already a member
+        $stmtChk = $pdo->prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtChk->execute([$gid, $uid]);
+        if ($stmtChk->fetchColumn()) {
+            jsonErr('User already a member', 409);
+            exit;
+        }
+
+        // insert membership
+        $stmtIns = $pdo->prepare('INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)');
+        $stmtIns->execute([$gid, $uid, $role]);
+
+        // activity log
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$_SESSION['user_id'], $gid, 'group_member_added', json_encode(['added_user_id' => (int)$uid, 'role' => $role])]);
+        } catch (Exception $e) {
+            // ignore
+        }
+
+        // return added user details for client-side update
+        $stmtUser = $pdo->prepare('SELECT id, name, email FROM users WHERE id = ?');
+        $stmtUser->execute([$uid]);
+        $userRow = $stmtUser->fetch(PDO::FETCH_ASSOC);
+        jsonOk(['group_id' => $gid, 'user' => $userRow, 'role' => $role]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error adding member: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// POST /api/groups/{id}/invites -> invite an email to the group (owner/admin only)
+if ($method === 'POST' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $email = trim($data['email'] ?? '');
+    $role = in_array($data['role'] ?? 'member', ['member', 'admin']) ? $data['role'] : 'member';
+    if (!$email) {
+        jsonErr('Missing email', 422);
+        exit;
+    }
+
+    try {
+        // check group exists
+        $stmt = $pdo->prepare('SELECT id FROM groups_tbl WHERE id = ?');
+        $stmt->execute([$gid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Group not found', 404);
+            exit;
+        }
+
+        // ensure current user is owner or admin in group
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $_SESSION['user_id']]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden: only owner/admin can invite members', 403);
+            exit;
+        }
+
+        // check not already a member
+        $stmtU = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        $stmtU->execute([$email]);
+        $uid = $stmtU->fetchColumn();
+        if ($uid) {
+            // user exists — suggest using the add member endpoint
+            jsonErr('User already registered; use add member instead', 409);
+            exit;
+        }
+
+        // create invite token and insert
+        $token = bin2hex(random_bytes(16));
+        try {
+            $stmtInv = $pdo->prepare('INSERT INTO group_invites (group_id, email, role, invited_by, token) VALUES (?, ?, ?, ?, ?)');
+            $stmtInv->execute([$gid, $email, $role, $_SESSION['user_id'], $token]);
+            $inviteId = (int)$pdo->lastInsertId();
+        } catch (Exception $e) {
+            // unique constraint (already invited)
+            jsonErr('Invite already exists for this email', 409);
+            exit;
+        }
+
+        // activity log (record that an invite was created)
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$_SESSION['user_id'], $gid, 'group_invite_created', json_encode(['invite_id' => $inviteId, 'email' => $email, 'role' => $role])]);
+        } catch (Exception $e) {
+            // ignore activity logging errors
+        }
+
+        // NOTE: sending email is not implemented in this minimal demo.
+        jsonOk(['invite_id' => $inviteId, 'email' => $email, 'role' => $role, 'token' => $token]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error creating invite: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// GET /api/groups/{id}/invites -> list pending invites for a group (owner/admin only)
+if ($method === 'GET' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    try {
+        // check role
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $_SESSION['user_id']]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden', 403);
+            exit;
+        }
+        $stmt = $pdo->prepare('SELECT id, email, role, invited_by, created_at FROM group_invites WHERE group_id = ? ORDER BY created_at DESC');
+        $stmt->execute([$gid]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        jsonOk(['invites' => $rows]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error fetching invites: ' . $e->getMessage(), 500);
         exit;
     }
 }

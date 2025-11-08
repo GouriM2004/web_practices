@@ -42,53 +42,64 @@ $stmt->execute([$gid]);
 $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<div class="card">
-    <div class="card-body">
-        <h2 class="card-title"><?= htmlspecialchars($group['name']) ?></h2>
-        <p class="text-muted"><?= nl2br(htmlspecialchars($group['description'])) ?></p>
+<div id="groupPage" data-group-id="<?= $gid ?>">
+    <div class="card">
+        <div class="card-body">
+            <h2 class="card-title"><?= htmlspecialchars($group['name']) ?></h2>
+            <p class="text-muted"><?= nl2br(htmlspecialchars($group['description'])) ?></p>
 
-        <?php if ($membership): ?>
-            <div class="mb-3"><strong>Your role:</strong> <?= htmlspecialchars($membership) ?></div>
-        <?php else: ?>
-            <div class="mb-3">You are not a member of this group. <button id="joinBtn" class="btn btn-sm btn-primary">Join group</button></div>
-        <?php endif; ?>
+            <?php if ($membership): ?>
+                <div class="mb-3"><strong>Your role:</strong> <?= htmlspecialchars($membership) ?></div>
+            <?php else: ?>
+                <div class="mb-3">You are not a member of this group. <button id="joinBtn" class="btn btn-sm btn-primary">Join group</button></div>
+            <?php endif; ?>
 
-        <h4>Members</h4>
-        <ul class="list-group mb-3">
-            <?php foreach ($members as $m): ?>
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                    <div><?= htmlspecialchars($m['name']) ?> <div class="small text-muted"><?= htmlspecialchars($m['email']) ?></div>
-                    </div>
-                    <div class="small text-muted"><?= htmlspecialchars($m['role']) ?></div>
-                </li>
-            <?php endforeach; ?>
-        </ul>
+            <?php if ($membership && in_array($membership, ['owner', 'admin'])): ?>
+                <hr>
+                <div class="alert alert-secondary">Member management (add/remove) is temporarily disabled.</div>
+            <?php endif; ?>
 
-        <h4>Group goals</h4>
-        <?php if (!$goals): ?>
-            <p>No group goals yet.</p>
-        <?php else: ?>
-            <ul class="list-group mb-3">
-                <?php foreach ($goals as $g): ?>
-                    <li class="list-group-item d-flex justify-content-between align-items-start">
-                        <div>
-                            <div class="fw-bold"><a href="goal.php?id=<?= (int)$g['id'] ?>"><?= htmlspecialchars($g['title']) ?></a></div>
-                            <div class="small text-muted">Cadence: <?= htmlspecialchars($g['cadence']) ?> • Unit: <?= htmlspecialchars($g['unit'] ?? '') ?></div>
+            <h4>Members</h4>
+            <ul id="membersList" class="list-group mb-3">
+                <?php foreach ($members as $m): ?>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div><?= htmlspecialchars($m['name']) ?> <div class="small text-muted"><?= htmlspecialchars($m['email']) ?></div>
                         </div>
-                        <div>
-                            <a class="btn btn-sm btn-outline-primary" href="goal.php?id=<?= (int)$g['id'] ?>">Open</a>
-                        </div>
+                        <div class="small text-muted"><?= htmlspecialchars($m['role']) ?></div>
                     </li>
                 <?php endforeach; ?>
             </ul>
-        <?php endif; ?>
 
-        <?php if ($membership): ?>
-            <a class="btn btn-primary" href="create_goal.php?group_id=<?= $gid ?>">Create group goal</a>
-        <?php endif; ?>
+            <h4>Group goals</h4>
+            <?php if (!$goals): ?>
+                <p>No group goals yet.</p>
+            <?php else: ?>
+                <ul class="list-group mb-3">
+                    <?php foreach ($goals as $g): ?>
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="fw-bold"><a href="goal.php?id=<?= (int)$g['id'] ?>"><?= htmlspecialchars($g['title']) ?></a></div>
+                                <div class="small text-muted">Cadence: <?= htmlspecialchars($g['cadence']) ?> • Unit: <?= htmlspecialchars($g['unit'] ?? '') ?></div>
+                            </div>
+                            <div>
+                                <a class="btn btn-sm btn-outline-primary" href="goal.php?id=<?= (int)$g['id'] ?>">Open</a>
+                            </div>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
 
-        <p class="mt-3"><a href="groups.php">Back to groups</a></p>
+            <?php if ($membership): ?>
+                <a class="btn btn-primary" href="create_goal.php?group_id=<?= $gid ?>">Create group goal</a>
+            <?php endif; ?>
+
+            <p class="mt-3"><a href="groups.php">Back to groups</a></p>
+        </div>
     </div>
-</div>
 
-<?php include __DIR__ . '/includes/footer.php'; ?>
+    <script>
+        // Server-side hint so we can confirm the gid value even if group.js doesn't load
+        console.info('group.php server gid', <?= json_encode($gid) ?>);
+    </script>
+
+    <?php include __DIR__ . '/includes/footer.php'; ?>

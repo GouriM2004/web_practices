@@ -48,6 +48,25 @@ CREATE TABLE IF NOT EXISTS group_members (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ==============================
+-- GROUP INVITES TABLE
+-- ==============================
+CREATE TABLE IF NOT EXISTS group_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT NOT NULL,
+  email VARCHAR(150) NOT NULL,
+  role ENUM('member','admin') DEFAULT 'member',
+  invited_by INT DEFAULT NULL,
+  token VARCHAR(64) NOT NULL,
+  accepted_by INT DEFAULT NULL,
+  accepted_at DATETIME DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE,
+  FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (accepted_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY (group_id, email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
 -- GOALS TABLE
 -- ==============================
 CREATE TABLE IF NOT EXISTS goals (
