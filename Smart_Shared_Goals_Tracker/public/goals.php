@@ -8,12 +8,12 @@ if (empty($_SESSION['user_id'])) {
 }
 $userId = $_SESSION['user_id'];
 
-// Fetch personal and group goals the user can see (simple: personal + created_by)
-$stmt = $pdo->prepare("SELECT g.id, g.title, g.description, g.cadence, g.unit, g.start_date, g.end_date, m.current_streak, m.longest_streak, m.last_checkin
- FROM goals g
- LEFT JOIN goal_user_meta m ON m.goal_id = g.id AND m.user_id = :uid
- WHERE g.active = 1 AND (g.created_by = :uid OR g.group_id IS NULL)
- ORDER BY g.created_at DESC");
+$stmt = $pdo->prepare("SELECT g.id, g.title, g.description, g.cadence, g.unit, g.start_date, g.end_date, g.group_id, g.created_by, gg.name AS group_name, m.current_streak, m.longest_streak, m.last_checkin
+     FROM goals g
+     LEFT JOIN groups_tbl gg ON gg.id = g.group_id
+     LEFT JOIN goal_user_meta m ON m.goal_id = g.id AND m.user_id = :uid
+     WHERE g.active = 1 AND (g.created_by = :uid OR g.group_id IS NULL OR g.group_id IN (SELECT group_id FROM group_members WHERE user_id = :uid))
+     ORDER BY g.created_at DESC");
 $stmt->execute(['uid' => $userId]);
 $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -28,13 +28,38 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php foreach ($goals as $g): ?>
                     <li class="list-group-item d-flex justify-content-between align-items-start" data-id="<?= htmlspecialchars($g['id']) ?>">
                         <div>
-                            <div class="fw-bold"><a href="goal.php?id=<?= htmlspecialchars($g['id']) ?>"><?= htmlspecialchars($g['title']) ?></a></div>
+                            <div class="fw-bold">
+                                <?php if (!empty($g['group_id'])): ?>
+                                    <span class="badge bg-info text-white me-2">Group: <?= htmlspecialchars($g['group_name'] ?? 'Group') ?></span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary text-white me-2">Personal</span>
+                                <?php endif; ?>
+                                <a href="goal.php?id=<?= htmlspecialchars($g['id']) ?>"><?= htmlspecialchars($g['title']) ?></a>
+                            </div>
                             <div class="small text-muted">Cadence: <?= htmlspecialchars($g['cadence']) ?> • Unit: <?= htmlspecialchars($g['unit'] ?? '') ?></div>
                         </div>
                         <div class="text-end">
                             <div>Streak: <strong><?= (int)$g['current_streak'] ?></strong></div>
                             <div>Longest: <strong><?= (int)$g['longest_streak'] ?></strong></div>
-                            <div class="mt-2"><button class="btn btn-sm btn-outline-primary checkinBtn">Check in</button></div>
+                            <div class="mt-2 d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-primary checkinBtn">Check in</button>
+                                <?php
+                                // show delete if user created this goal or is group owner/admin for the group
+                                $canDelete = false;
+                                if ((int)$g['group_id'] === 0 || $g['group_id'] === null) {
+                                    if ((int)$g['created_by'] === (int)$userId) $canDelete = true;
+                                } else {
+                                    // check user's role in that group
+                                    $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+                                    $stmtRole->execute([(int)$g['group_id'], $userId]);
+                                    $r = $stmtRole->fetchColumn();
+                                    if (in_array($r, ['owner', 'admin'])) $canDelete = true;
+                                }
+                                ?>
+                                <?php if ($canDelete): ?>
+                                    <button class="btn btn-sm btn-outline-danger delete-goal" data-goal-id="<?= htmlspecialchars($g['id']) ?>">Delete</button>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </li>
                 <?php endforeach; ?>

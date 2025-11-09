@@ -567,13 +567,37 @@ if ($method === 'POST' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
             exit;
         }
 
-        // check not already a member
+        // check whether the email belongs to an existing user
         $stmtU = $pdo->prepare('SELECT id FROM users WHERE email = ?');
         $stmtU->execute([$email]);
         $uid = $stmtU->fetchColumn();
         if ($uid) {
-            // user exists — suggest using the add member endpoint
-            jsonErr('User already registered; use add member instead', 409);
+            // If user exists, add them directly to the group (owner/admin requested invite but user already has account)
+            // check already a member
+            $stmtChk = $pdo->prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtChk->execute([$gid, $uid]);
+            if ($stmtChk->fetchColumn()) {
+                jsonErr('User already a member', 409);
+                exit;
+            }
+
+            // insert membership
+            $stmtIns = $pdo->prepare('INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)');
+            $stmtIns->execute([$gid, $uid, $role]);
+
+            // activity log
+            try {
+                $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+                $stmtAct->execute([$_SESSION['user_id'], $gid, 'group_member_added_via_invite', json_encode(['added_user_id' => (int)$uid, 'role' => $role])]);
+            } catch (Exception $e) {
+                // ignore
+            }
+
+            // return added user details for client-side update
+            $stmtUser = $pdo->prepare('SELECT id, name, email FROM users WHERE id = ?');
+            $stmtUser->execute([$uid]);
+            $userRow = $stmtUser->fetch(PDO::FETCH_ASSOC);
+            jsonOk(['group_id' => $gid, 'user' => $userRow, 'role' => $role, 'added_via_invite' => true]);
             exit;
         }
 
@@ -633,6 +657,98 @@ if ($method === 'GET' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
     }
 }
 
+// POST /api/groups/{id}/invites/{invite_id}/resend -> (simulate) resend invite (owner/admin only)
+if ($method === 'POST' && preg_match('#^groups/(\d+)/invites/(\d+)/resend$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $inviteId = (int)$m[2];
+    try {
+        // check role
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $_SESSION['user_id']]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden', 403);
+            exit;
+        }
+        // fetch invite
+        $stmt = $pdo->prepare('SELECT id, email, role, token FROM group_invites WHERE id = ? AND group_id = ?');
+        $stmt->execute([$inviteId, $gid]);
+        $inv = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$inv) {
+            jsonErr('Invite not found', 404);
+            exit;
+        }
+
+        // In a full app we'd re-send the email here. For demo, return the token and mark 'resent' time by updating updated_at
+        try {
+            $stmtUpd = $pdo->prepare('UPDATE group_invites SET created_at = NOW() WHERE id = ?');
+            $stmtUpd->execute([$inviteId]);
+        } catch (Exception $e) {
+            // ignore update errors
+        }
+
+        // log activity
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$_SESSION['user_id'], $gid, 'invite_resent', json_encode(['invite_id' => $inviteId])]);
+        } catch (Exception $e) {
+        }
+
+        jsonOk(['invite_id' => $inviteId, 'email' => $inv['email'], 'token' => $inv['token']]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error resending invite: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// DELETE /api/groups/{id}/invites/{invite_id} -> cancel invite (owner/admin only)
+if ($method === 'DELETE' && preg_match('#^groups/(\d+)/invites/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $inviteId = (int)$m[2];
+    try {
+        // check role
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $_SESSION['user_id']]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden', 403);
+            exit;
+        }
+        // ensure invite exists
+        $stmt = $pdo->prepare('SELECT id, email FROM group_invites WHERE id = ? AND group_id = ?');
+        $stmt->execute([$inviteId, $gid]);
+        $inv = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$inv) {
+            jsonErr('Invite not found', 404);
+            exit;
+        }
+        // delete invite
+        $stmtDel = $pdo->prepare('DELETE FROM group_invites WHERE id = ?');
+        $stmtDel->execute([$inviteId]);
+        // activity log
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$_SESSION['user_id'], $gid, 'invite_cancelled', json_encode(['invite_id' => $inviteId, 'email' => $inv['email']])]);
+        } catch (Exception $e) {
+        }
+
+        jsonOk(['invite_id' => $inviteId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error cancelling invite: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // ----------------------------
 // Activity endpoint
 // ----------------------------
@@ -672,3 +788,53 @@ if ($method === 'GET' && preg_match('#^activity$#', $path)) {
 
 http_response_code(404);
 echo json_encode(['error' => 'Not found']);
+
+// DELETE /api/goals/{id} -> delete a goal (creator or group owner/admin)
+if ($method === 'DELETE' && preg_match('#^goals/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    try {
+        $stmt = $pdo->prepare('SELECT id, created_by, group_id FROM goals WHERE id = ?');
+        $stmt->execute([$goalId]);
+        $g = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$g) {
+            jsonErr('Goal not found', 404);
+            exit;
+        }
+        $uid = $_SESSION['user_id'];
+        $allowed = false;
+        if ((int)$g['created_by'] === (int)$uid) {
+            $allowed = true;
+        } elseif (!empty($g['group_id'])) {
+            // check group role
+            $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtRole->execute([$g['group_id'], $uid]);
+            $myRole = $stmtRole->fetchColumn();
+            if (in_array($myRole, ['owner', 'admin'])) $allowed = true;
+        }
+        if (!$allowed) {
+            jsonErr('Forbidden', 403);
+            exit;
+        }
+
+        // delete goal (cascade will remove related checkins/meta)
+        $stmtDel = $pdo->prepare('DELETE FROM goals WHERE id = ?');
+        $stmtDel->execute([$goalId]);
+
+        // activity log
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, goal_id, action, meta) VALUES (?, ?, ?, ?, ?)');
+            $stmtAct->execute([$uid, $g['group_id'] ?: null, $goalId, 'goal_deleted', json_encode([])]);
+        } catch (Exception $e) {
+        }
+
+        jsonOk(['deleted' => (int)$goalId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error deleting goal: ' . $e->getMessage(), 500);
+        exit;
+    }
+}

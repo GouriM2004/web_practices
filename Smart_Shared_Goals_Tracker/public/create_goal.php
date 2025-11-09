@@ -8,6 +8,7 @@ if (empty($_SESSION['user_id'])) {
 }
 $userId = $_SESSION['user_id'];
 $error = '';
+$groupId = isset($_GET['group_id']) ? (int)$_GET['group_id'] : null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
     $desc = trim($_POST['description'] ?? '');
@@ -18,8 +19,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($title === '') {
         $error = 'Title is required';
     } else {
-        $stmt = $pdo->prepare('INSERT INTO goals (title, description, created_by, cadence, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$title, $desc, $userId, $cadence, $unit ?: null, $start_date, $end_date]);
+        if (!empty($_POST['group_id'])) {
+            $gId = (int)$_POST['group_id'];
+            $stmt = $pdo->prepare('INSERT INTO goals (title, description, created_by, group_id, cadence, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$title, $desc, $userId, $gId, $cadence, $unit ?: null, $start_date, $end_date]);
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO goals (title, description, created_by, cadence, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$title, $desc, $userId, $cadence, $unit ?: null, $start_date, $end_date]);
+        }
         header('Location: goals.php');
         exit;
     }
@@ -30,6 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h2>Create Goal</h2>
         <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
         <form method="post">
+            <?php if ($groupId): ?>
+                <input type="hidden" name="group_id" value="<?= (int)$groupId ?>">
+            <?php endif; ?>
             <div class="mb-3">
                 <label class="form-label">Title</label>
                 <input name="title" class="form-control" required>

@@ -36,8 +36,27 @@ $stmt = $pdo->prepare('SELECT u.id, u.name, u.email, gm.role FROM users u JOIN g
 $stmt->execute([$gid]);
 $members = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// pending invites (visible to owners/admins)
+$stmt = $pdo->prepare('SELECT gi.id, gi.email, gi.role, gi.invited_by, gi.accepted_by, gi.created_at, gi.accepted_at, u.name AS invited_by_name, a.name AS accepted_by_name FROM group_invites gi LEFT JOIN users u ON gi.invited_by = u.id LEFT JOIN users a ON gi.accepted_by = a.id WHERE gi.group_id = ? ORDER BY gi.created_at DESC');
+$stmt->execute([$gid]);
+$invites = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// small helper to render human-friendly times
+function time_ago($datetime)
+{
+    if (!$datetime) return '';
+    $ts = strtotime($datetime);
+    if ($ts === false) return htmlspecialchars($datetime);
+    $diff = time() - $ts;
+    if ($diff < 60) return $diff . 's ago';
+    if ($diff < 3600) return floor($diff / 60) . 'm ago';
+    if ($diff < 86400) return floor($diff / 3600) . 'h ago';
+    if ($diff < 604800) return floor($diff / 86400) . 'd ago';
+    return date('Y-m-d H:i', $ts);
+}
+
 // group goals
-$stmt = $pdo->prepare('SELECT id, title, cadence, unit, start_date, end_date FROM goals WHERE group_id = ? AND active = 1 ORDER BY created_at DESC');
+$stmt = $pdo->prepare('SELECT id, title, cadence, unit, start_date, end_date, created_by FROM goals WHERE group_id = ? AND active = 1 ORDER BY created_at DESC');
 $stmt->execute([$gid]);
 $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -56,7 +75,22 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             <?php if ($membership && in_array($membership, ['owner', 'admin'])): ?>
                 <hr>
-                <div class="alert alert-secondary">Member management (add/remove) is temporarily disabled.</div>
+                <h4>Add member</h4>
+                <form id="addMemberForm" class="mb-3">
+                    <div class="mb-2">
+                        <label class="form-label">User email</label>
+                        <input name="email" type="email" class="form-control" required placeholder="user@example.com">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Role</label>
+                        <select name="role" class="form-select">
+                            <option value="member">Member</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-success" type="button" id="addMemberBtn">Add member</button>
+                    <div id="addMemberMsg" class="mt-2"></div>
+                </form>
             <?php endif; ?>
 
             <h4>Members</h4>
@@ -70,6 +104,32 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endforeach; ?>
             </ul>
 
+            <?php if ($membership && in_array($membership, ['owner', 'admin'])): ?>
+                <h4>Pending invites</h4>
+                <?php if (empty($invites)): ?>
+                    <p id="noInvitesMsg">No pending invites.</p>
+                <?php else: ?>
+                    <ul id="invitesList" class="list-group mb-3">
+                        <?php foreach ($invites as $inv): ?>
+                            <li class="list-group-item d-flex justify-content-between align-items-center" data-invite-id="<?= (int)$inv['id'] ?>">
+                                <div>
+                                    <?= htmlspecialchars($inv['email']) ?>
+                                    <div class="small text-muted">Invited as <?= htmlspecialchars($inv['role']) ?> by <?= htmlspecialchars($inv['invited_by_name'] ?? 'System') ?> · <?= htmlspecialchars(time_ago($inv['created_at'])) ?></div>
+                                </div>
+                                <div>
+                                    <?php if ($inv['accepted_at']): ?>
+                                        <a href="user.php?id=<?= (int)$inv['accepted_by'] ?>"><?= htmlspecialchars($inv['accepted_by_name'] ?? 'Member') ?></a>
+                                    <?php else: ?>
+                                        <button class="btn btn-sm btn-outline-secondary resend-invite" data-invite-id="<?= (int)$inv['id'] ?>">Resend</button>
+                                        <button class="btn btn-sm btn-outline-danger cancel-invite" data-invite-id="<?= (int)$inv['id'] ?>">Cancel</button>
+                                    <?php endif; ?>
+                                </div>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+            <?php endif; ?>
+
             <h4>Group goals</h4>
             <?php if (!$goals): ?>
                 <p>No group goals yet.</p>
@@ -78,7 +138,22 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php foreach ($goals as $g): ?>
                         <li class="list-group-item d-flex justify-content-between align-items-start">
                             <div>
-                                <div class="fw-bold"><a href="goal.php?id=<?= (int)$g['id'] ?>"><?= htmlspecialchars($g['title']) ?></a></div>
+                                <div class="fw-bold d-flex align-items-center justify-content-between">
+                                    <div>
+                                        <span class="badge bg-info text-white me-2">Group</span>
+                                        <a href="goal.php?id=<?= (int)$g['id'] ?>"><?= htmlspecialchars($g['title']) ?></a>
+                                    </div>
+                                    <div>
+                                        <?php
+                                        $canDelete = false;
+                                        if ((int)$g['created_by'] === (int)$userId) $canDelete = true;
+                                        if ($membership && in_array($membership, ['owner', 'admin'])) $canDelete = true;
+                                        ?>
+                                        <?php if ($canDelete): ?>
+                                            <button class="btn btn-sm btn-outline-danger delete-goal" data-goal-id="<?= (int)$g['id'] ?>">Delete</button>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
                                 <div class="small text-muted">Cadence: <?= htmlspecialchars($g['cadence']) ?> • Unit: <?= htmlspecialchars($g['unit'] ?? '') ?></div>
                             </div>
                             <div>
@@ -100,6 +175,8 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <script>
         // Server-side hint so we can confirm the gid value even if group.js doesn't load
         console.info('group.php server gid', <?= json_encode($gid) ?>);
+        // Debug: print fetched group goals so we can see what the server returned
+        console.info('group.php goals', <?= json_encode($goals) ?>);
     </script>
 
     <?php include __DIR__ . '/includes/footer.php'; ?>
