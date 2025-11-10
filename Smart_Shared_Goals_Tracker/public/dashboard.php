@@ -6,8 +6,9 @@ include __DIR__ . '/includes/header.php';
     <div class="col-md-8">
         <h2>Dashboard</h2>
         <div id="user">Loading...</div>
-        <p class="mt-3"><a href="goals.php" class="btn btn-outline-primary">My Goals</a>
-            <a href="create_goal.php" class="btn btn-primary">Create Goal</a>
+        <p class="mt-3">
+            <button id="myGoalsBtn" class="btn btn-outline-primary">My Goals</button>
+            <button id="createGoalBtn" class="btn btn-primary">Create Goal</button>
         </p>
     </div>
     <div class="col-md-4">
@@ -38,4 +39,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('outboxCount').textContent = items.length;
     }
     updateOutbox();
+    // wire dashboard buttons to navigate without anchors
+    document.getElementById('myGoalsBtn')?.addEventListener('click', function() {
+        location.href = 'goals.php';
+    });
+    document.getElementById('createGoalBtn')?.addEventListener('click', function() {
+        location.href = 'create_goal.php';
+    });
 </script>

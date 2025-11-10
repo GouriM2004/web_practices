@@ -301,6 +301,13 @@ document.addEventListener(
   "click",
   async function (e) {
     const target = e.target;
+    // compute gid/basePath here as this listener lives outside the main IIFE
+    const pageEl = document.getElementById("groupPage");
+    let gid = null;
+    if (pageEl && pageEl.dataset && pageEl.dataset.groupId)
+      gid = pageEl.dataset.groupId;
+    if (!gid) gid = new URLSearchParams(window.location.search).get("id");
+    const basePath = window.location.pathname.replace(/\/group\.php.*$/i, "");
     if (target.matches(".resend-invite")) {
       const inviteId = target.dataset.inviteId;
       if (!inviteId || !gid) return;
@@ -384,6 +391,91 @@ document.addEventListener(
       } catch (err) {
         console.error("cancel invite failed", err);
         UI.toast("Cancel failed", "danger");
+      }
+    }
+
+    // Leave group (self-removal)
+    if (target.matches("#leaveGroupBtn")) {
+      if (!gid) return;
+      if (!confirm("Are you sure you want to leave this group?")) return;
+      try {
+        target.disabled = true;
+        const url =
+          basePath + "/api.php/groups/" + encodeURIComponent(gid) + "/leave";
+        const r = await fetch(url, { method: "POST", credentials: "include" });
+        const txt = await r.text();
+        let payload = null;
+        try {
+          payload = JSON.parse(txt);
+        } catch (e) {
+          payload = null;
+        }
+        if (!r.ok) {
+          const err =
+            payload && (payload.error || payload.message)
+              ? payload.error || payload.message
+              : txt || "Request failed: " + r.status;
+          UI.toast(err, "danger");
+          return;
+        }
+        UI.toast("You left the group", "success");
+        // redirect back to groups list
+        setTimeout(() => {
+          location.href = basePath + "/groups.php";
+        }, 400);
+      } catch (err) {
+        console.error("leave group failed", err);
+        UI.toast("Leave failed", "danger");
+      } finally {
+        try {
+          target.disabled = false;
+        } catch (e) {}
+      }
+    }
+
+    // Remove member (owners and admins - permission enforced server-side)
+    if (target.matches(".remove-member-btn")) {
+      const memberId = target.dataset.memberId;
+      if (!memberId || !gid) return;
+      if (!confirm("Remove this member from the group?")) return;
+      try {
+        target.disabled = true;
+        const url =
+          basePath +
+          "/api.php/groups/" +
+          encodeURIComponent(gid) +
+          "/members/" +
+          encodeURIComponent(memberId);
+        const r = await fetch(url, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        const txt = await r.text();
+        let payload = null;
+        try {
+          payload = JSON.parse(txt);
+        } catch (e) {
+          payload = null;
+        }
+        if (!r.ok) {
+          const err =
+            payload && (payload.error || payload.message)
+              ? payload.error || payload.message
+              : txt || "Request failed: " + r.status;
+          UI.toast(err, "danger");
+          return;
+        }
+        UI.toast("Member removed", "success");
+        // remove list item from DOM
+        const li = target.closest("li");
+        if (li) li.parentNode.removeChild(li);
+      } catch (err) {
+        console.error("remove member failed", err);
+        UI.toast("Remove failed", "danger");
+      } finally {
+        try {
+          target.disabled = false;
+        } catch (e) {}
       }
     }
   },

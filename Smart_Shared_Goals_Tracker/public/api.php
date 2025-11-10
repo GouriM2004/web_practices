@@ -630,6 +630,55 @@ if ($method === 'POST' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
     }
 }
 
+// POST /api/groups/{id}/leave -> current user leaves the group (self-removal)
+if ($method === 'POST' && preg_match('#^groups/(\d+)/leave$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $uid = $_SESSION['user_id'];
+    try {
+        // ensure membership exists
+        $stmt = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmt->execute([$gid, $uid]);
+        $role = $stmt->fetchColumn();
+        if (!$role) {
+            jsonErr('Not a member of this group', 404);
+            exit;
+        }
+
+        // if owner, ensure there is another owner before allowing leave
+        if ($role === 'owner') {
+            $stmtOther = $pdo->prepare('SELECT COUNT(*) FROM group_members WHERE group_id = ? AND role = ? AND user_id != ?');
+            $stmtOther->execute([$gid, 'owner', $uid]);
+            $otherOwners = (int)$stmtOther->fetchColumn();
+            if ($otherOwners <= 0) {
+                jsonErr('You are the only owner. Transfer ownership or delete the group before leaving.', 403);
+                exit;
+            }
+        }
+
+        // perform removal
+        $stmtDel = $pdo->prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtDel->execute([$gid, $uid]);
+
+        // activity log
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$uid, $gid, 'group_left', json_encode([])]);
+        } catch (Exception $e) {
+            // ignore
+        }
+
+        jsonOk(['left_group' => $gid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error leaving group: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // GET /api/groups/{id}/invites -> list pending invites for a group (owner/admin only)
 if ($method === 'GET' && preg_match('#^groups/(\d+)/invites$#', $path, $m)) {
     if (empty($_SESSION['user_id'])) {
@@ -745,6 +794,74 @@ if ($method === 'DELETE' && preg_match('#^groups/(\d+)/invites/(\d+)$#', $path, 
         exit;
     } catch (Exception $e) {
         jsonErr('Error cancelling invite: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// DELETE /api/groups/{id}/members/{user_id} -> remove a member (owner can remove anyone except self; admin can remove members only)
+if ($method === 'DELETE' && preg_match('#^groups/(\d+)/members/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $gid = (int)$m[1];
+    $targetUid = (int)$m[2];
+    $uid = $_SESSION['user_id'];
+    try {
+        // ensure group exists
+        $stmt = $pdo->prepare('SELECT id FROM groups_tbl WHERE id = ?');
+        $stmt->execute([$gid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Group not found', 404);
+            exit;
+        }
+
+        // current user's role
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $uid]);
+        $myRole = $stmtRole->fetchColumn();
+        if (!in_array($myRole, ['owner', 'admin'])) {
+            jsonErr('Forbidden: only owner/admin can remove members', 403);
+            exit;
+        }
+
+        // target member row
+        $stmtTarget = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtTarget->execute([$gid, $targetUid]);
+        $targetRole = $stmtTarget->fetchColumn();
+        if (!$targetRole) {
+            jsonErr('Member not found', 404);
+            exit;
+        }
+
+        // prevent self-remove via this endpoint (use leave group flow if needed)
+        if ((int)$targetUid === (int)$uid) {
+            jsonErr('Use the leave group action to remove yourself', 403);
+            exit;
+        }
+
+        // admin restrictions: admin can remove only plain members
+        if ($myRole === 'admin' && $targetRole !== 'member') {
+            jsonErr('Forbidden: admin can remove members only', 403);
+            exit;
+        }
+
+        // owner may remove others (including admins), proceed to delete
+        $stmtDel = $pdo->prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtDel->execute([$gid, $targetUid]);
+
+        // activity log
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, action, meta) VALUES (?, ?, ?, ?)');
+            $stmtAct->execute([$uid, $gid, 'group_member_removed', json_encode(['removed_user_id' => (int)$targetUid, 'by' => (int)$uid])]);
+        } catch (Exception $e) {
+            // ignore
+        }
+
+        jsonOk(['removed_user_id' => $targetUid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error removing member: ' . $e->getMessage(), 500);
         exit;
     }
 }

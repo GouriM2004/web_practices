@@ -8,6 +8,5 @@ include __DIR__ . '/includes/header.php';
     <p class="lead">Form small groups, set shared goals, track daily check-ins, and build streaks together.</p>
     <p><a href="register.php" class="btn btn-primary">Get started — Register</a></p>
     <hr>
-    <p>Developer links: <a href="api.php">API</a> • <a href="goals.php">Goals</a> • <a href="dashboard.php">Dashboard</a></p>
 </div>
 <?php include __DIR__ . '/includes/footer.php'; ?>

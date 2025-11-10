@@ -68,7 +68,27 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <p class="text-muted"><?= nl2br(htmlspecialchars($group['description'])) ?></p>
 
             <?php if ($membership): ?>
-                <div class="mb-3"><strong>Your role:</strong> <?= htmlspecialchars($membership) ?></div>
+                <div class="mb-3 d-flex align-items-center">
+                    <div class="me-3"><strong>Your role:</strong> <?= htmlspecialchars($membership) ?></div>
+                    <?php
+                    // determine whether this user may leave the group safely
+                    $can_leave = true;
+                    if ($membership === 'owner') {
+                        // ensure there is at least one other owner before allowing leave
+                        $stmtOtherOwner = $pdo->prepare('SELECT COUNT(*) FROM group_members WHERE group_id = ? AND role = ? AND user_id != ?');
+                        $stmtOtherOwner->execute([$gid, 'owner', $userId]);
+                        $otherOwners = (int)$stmtOtherOwner->fetchColumn();
+                        if ($otherOwners <= 0) {
+                            $can_leave = false;
+                        }
+                    }
+                    ?>
+                    <?php if ($can_leave): ?>
+                        <button id="leaveGroupBtn" class="btn btn-sm btn-outline-danger">Leave group</button>
+                    <?php else: ?>
+                        <small class="text-muted">Transfer ownership before leaving.</small>
+                    <?php endif; ?>
+                </div>
             <?php else: ?>
                 <div class="mb-3">You are not a member of this group. <button id="joinBtn" class="btn btn-sm btn-primary">Join group</button></div>
             <?php endif; ?>
@@ -96,10 +116,25 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <h4>Members</h4>
             <ul id="membersList" class="list-group mb-3">
                 <?php foreach ($members as $m): ?>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <li class="list-group-item d-flex justify-content-between align-items-center" data-member-id="<?= (int)$m['id'] ?>">
                         <div><?= htmlspecialchars($m['name']) ?> <div class="small text-muted"><?= htmlspecialchars($m['email']) ?></div>
                         </div>
-                        <div class="small text-muted"><?= htmlspecialchars($m['role']) ?></div>
+                        <div class="d-flex align-items-center">
+                            <div class="small text-muted me-3"><?= htmlspecialchars($m['role']) ?></div>
+                            <?php
+                            // show remove button if current user is owner (can remove anyone except self)
+                            // or if current user is admin (can remove plain members only)
+                            $canRemove = false;
+                            if ($membership === 'owner' && (int)$m['id'] !== (int)$userId) {
+                                $canRemove = true;
+                            } elseif ($membership === 'admin' && $m['role'] === 'member' && (int)$m['id'] !== (int)$userId) {
+                                $canRemove = true;
+                            }
+                            ?>
+                            <?php if ($canRemove): ?>
+                                <button class="btn btn-sm btn-outline-danger remove-member-btn" data-member-id="<?= (int)$m['id'] ?>">Remove</button>
+                            <?php endif; ?>
+                        </div>
                     </li>
                 <?php endforeach; ?>
             </ul>
