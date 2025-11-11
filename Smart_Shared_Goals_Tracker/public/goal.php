@@ -22,14 +22,33 @@ if (!$goal) {
     include __DIR__ . '/includes/footer.php';
     exit;
 }
+// recompute streaks for current user and persist (ensure goal_user_meta is up-to-date)
+try {
+    $streakSvc = new \Services\StreakService($pdo);
+    $streaks = $streakSvc->computeAndStoreStreaks($userId, $id);
+} catch (Exception $e) {
+    $streaks = ['current' => 0, 'longest' => 0, 'last_checkin' => null];
+}
 // fetch last 60 checkins for chart
 $stmt2 = $pdo->prepare('SELECT date, value, note, user_id FROM checkins WHERE goal_id = ? ORDER BY date DESC LIMIT 60');
 $stmt2->execute([$id]);
 $checkins = array_reverse($stmt2->fetchAll(PDO::FETCH_ASSOC));
+// fetch checkins for last year for heatmap & stats (current user)
+$stmtHeat = $pdo->prepare('SELECT date FROM checkins WHERE goal_id = ? AND user_id = ? AND date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)');
+$stmtHeat->execute([$id, $userId]);
+$heatRows = $stmtHeat->fetchAll(PDO::FETCH_COLUMN);
+
+// utility: convert PHP dates into JS-friendly arrays
+$heatDates = array_map(function ($d) {
+    return $d;
+}, $heatRows);
 ?>
 <div class="row">
     <div class="col-md-8">
         <h2><?= htmlspecialchars($goal['title']) ?></h2>
+        <?php if (!empty($streaks['current'])): ?>
+            <div class="mt-2 mb-2"><span class="badge bg-warning text-dark">🔥 <?= (int)$streaks['current'] ?>-day streak!</span></div>
+        <?php endif; ?>
         <p class="text-muted"><?= htmlspecialchars($goal['description']) ?></p>
         <canvas id="chart" height="120"></canvas>
         <h4 class="mt-4">Recent Check-ins</h4>
@@ -48,6 +67,19 @@ $checkins = array_reverse($stmt2->fetchAll(PDO::FETCH_ASSOC));
                 <h5>Quick Check-in</h5>
                 <p><button id="quickCheck" class="btn btn-primary">Check in for today</button></p>
                 <p><a href="goals.php" class="btn btn-link">Back to goals</a></p>
+                <hr>
+                <h6>Progress</h6>
+                <div id="progressMetrics">
+                    <div>Completion (30d): <strong id="pctComplete">—</strong></div>
+                    <div>Consistency (30d): <strong id="consistency">—</strong></div>
+                    <div>Current streak: <strong id="currentStreak">—</strong></div>
+                    <div>Longest streak: <strong id="longestStreak">—</strong></div>
+                </div>
+                <hr>
+                <h6>Streak heatmap (past year)</h6>
+                <div id="heatmap" style="width:100%; overflow:auto;">
+                    <div id="heatmapGrid" style="display:grid; grid-auto-flow:column; grid-template-rows: repeat(7,12px); grid-auto-columns: 12px; gap:4px; align-items:start;"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -56,7 +88,9 @@ $checkins = array_reverse($stmt2->fetchAll(PDO::FETCH_ASSOC));
 <?php include __DIR__ . '/includes/footer.php'; ?>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    const serverStreaks = <?= json_encode($streaks) ?>;
     const checkins = <?= json_encode($checkins) ?>;
+    const heatDates = <?= json_encode($heatDates) ?>; // array of YYYY-MM-DD strings
     const labels = checkins.map(c => c.date);
     const data = checkins.map(c => c.value === null ? null : Number(c.value));
     const ctx = document.getElementById('chart');
@@ -87,4 +121,113 @@ $checkins = array_reverse($stmt2->fetchAll(PDO::FETCH_ASSOC));
         });
         UI.toast(JSON.stringify(res));
     });
+
+    // Progress metrics & heatmap
+    (function renderProgress() {
+        // helper: set text
+        function setId(id, txt) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = txt;
+        }
+
+        // build set of dates
+        const checked = new Set(heatDates || []);
+        const today = new Date();
+        // compute last 30 days window
+        const daysWindow = 30;
+        const msDay = 24 * 60 * 60 * 1000;
+        let haveCount = 0;
+        for (let i = 0; i < daysWindow; i++) {
+            const d = new Date(Date.now() - (daysWindow - 1 - i) * msDay);
+            const key = d.toISOString().slice(0, 10);
+            if (checked.has(key)) haveCount++;
+        }
+        const pct = Math.round((haveCount / daysWindow) * 100);
+        setId('pctComplete', pct + '% (' + haveCount + '/' + daysWindow + ')');
+
+        // consistency = ratio of weeks with at least one check-in over last 4 weeks
+        const weeks = 4;
+        let weeksWith = 0;
+        for (let w = 0; w < weeks; w++) {
+            const start = new Date();
+            start.setDate(start.getDate() - (w * 7 + (7 - 1)));
+            const end = new Date();
+            end.setDate(end.getDate() - (w * 7));
+            // normalize to YYYY-MM-DD
+            let found = false;
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                const k = d.toISOString().slice(0, 10);
+                if (checked.has(k)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) weeksWith++;
+        }
+        const consistencyPct = Math.round((weeksWith / weeks) * 100);
+        setId('consistency', consistencyPct + '% (' + weeksWith + '/' + weeks + ' weeks)');
+
+        // streaks: compute current and longest streak from heatDates
+        // build sorted array of unique dates
+        const sorted = Array.from(checked).sort();
+        let longest = 0;
+        let current = 0;
+        let prev = null;
+        // compute longest streak
+        for (let d of sorted) {
+            if (!prev) {
+                current = 1;
+            } else {
+                const prevDate = new Date(prev);
+                const curDate = new Date(d);
+                const diff = (curDate - prevDate) / msDay;
+                if (diff === 1) {
+                    current += 1;
+                } else {
+                    if (current > longest) longest = current;
+                    current = 1;
+                }
+            }
+            prev = d;
+        }
+        if (current > longest) longest = current;
+
+        // compute current streak ending today
+        let curStreak = 0;
+        for (let i = 0; i < 365; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const k = d.toISOString().slice(0, 10);
+            if (checked.has(k)) curStreak++;
+            else break;
+        }
+        setId('currentStreak', curStreak + ' days');
+        setId('longestStreak', longest + ' days');
+
+        // render heatmap (past year)
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 364);
+        const grid = document.getElementById('heatmapGrid');
+        if (!grid) return;
+        // clear
+        grid.innerHTML = '';
+        for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+            const k = d.toISOString().slice(0, 10);
+            const el = document.createElement('div');
+            el.title = k;
+            el.dataset.date = k;
+            el.style.width = '12px';
+            el.style.height = '12px';
+            el.style.borderRadius = '3px';
+            el.style.display = 'inline-block';
+            el.style.boxSizing = 'border-box';
+            el.style.cursor = 'default';
+            if (checked.has(k)) {
+                el.style.background = '#216e39';
+            } else {
+                el.style.background = '#ebedf0';
+            }
+            grid.appendChild(el);
+        }
+    })();
 </script>
