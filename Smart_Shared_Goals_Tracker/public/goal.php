@@ -80,6 +80,10 @@ $heatDates = array_map(function ($d) {
                 <div id="heatmap" style="width:100%; overflow:auto;">
                     <div id="heatmapGrid" style="display:grid; grid-auto-flow:column; grid-template-rows: repeat(7,12px); grid-auto-columns: 12px; gap:4px; align-items:start;"></div>
                 </div>
+                <hr>
+                <div id="teamProgress" class="mt-3">
+                    <!-- Team progress & leaderboard (populated by JS) -->
+                </div>
             </div>
         </div>
     </div>
@@ -228,6 +232,73 @@ $heatDates = array_map(function ($d) {
                 el.style.background = '#ebedf0';
             }
             grid.appendChild(el);
+        }
+    })();
+
+    // Team progress & leaderboard (for group goals / collaborative goals)
+    (async function renderTeamProgress() {
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+        try {
+            const res = await fetch('api.php/goals/<?= $id ?>/stats', {
+                credentials: 'include'
+            });
+            if (!res.ok) return;
+            const payload = await res.json();
+            if (!payload || !payload.stats || !payload.stats.length) return;
+            const container = document.getElementById('teamProgress');
+            if (!container) return;
+            container.innerHTML = '';
+            const heading = document.createElement('h6');
+            heading.textContent = 'Team progress & leaderboard';
+            container.appendChild(heading);
+
+            // compute max for scaling
+            let maxMetric = 0;
+            payload.stats.forEach(s => {
+                const metric = s.total_value || s.checkins;
+                if (metric > maxMetric) maxMetric = metric;
+            });
+            if (maxMetric === 0) maxMetric = 1;
+
+            const list = document.createElement('div');
+            list.className = 'list-group mb-2';
+            payload.stats.forEach((s, idx) => {
+                const item = document.createElement('div');
+                item.className = 'list-group-item';
+                const title = document.createElement('div');
+                title.className = 'd-flex justify-content-between align-items-center';
+                title.innerHTML = '<div><strong>' + escapeHtml(s.name) + '</strong> <div class="small text-muted">' + (s.email || '') + '</div></div><div class="text-end"><small>' + (s.pct !== null ? s.pct + '%' : (s.checkins + ' checks')) + '</small></div>';
+                item.appendChild(title);
+
+                const metric = s.total_value || s.checkins;
+                const pct = Math.round((metric / maxMetric) * 100);
+                const barWrap = document.createElement('div');
+                barWrap.className = 'progress mt-2';
+                const bar = document.createElement('div');
+                bar.className = 'progress-bar';
+                bar.setAttribute('role', 'progressbar');
+                bar.style.width = pct + '%';
+                bar.textContent = metric;
+                barWrap.appendChild(bar);
+                item.appendChild(barWrap);
+
+                list.appendChild(item);
+            });
+
+            container.appendChild(list);
+
+            const top = payload.stats[0];
+            if (top) {
+                const trophy = document.createElement('div');
+                trophy.className = 'small text-muted';
+                trophy.innerHTML = 'Top: <strong>' + escapeHtml(top.name) + '</strong> — ' + (top.total_value || top.checkins) + '';
+                container.appendChild(trophy);
+            }
+        } catch (e) {
+            console.warn('Failed to load team stats', e);
         }
     })();
 </script>

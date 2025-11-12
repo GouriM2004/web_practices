@@ -866,9 +866,186 @@ if ($method === 'DELETE' && preg_match('#^groups/(\d+)/members/(\d+)$#', $path, 
     }
 }
 
+// GET /api/goals/{id}/stats -> team stats / leaderboard for a goal
+if ($method === 'GET' && preg_match('#^goals/(\d+)/stats$#', $path, $m)) {
+    $goalId = (int)$m[1];
+    try {
+        // fetch goal
+        $stmt = $pdo->prepare('SELECT id, title, cadence, target_value, start_date, end_date, group_id FROM goals WHERE id = ?');
+        $stmt->execute([$goalId]);
+        $goal = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$goal) {
+            jsonErr('Goal not found', 404);
+            exit;
+        }
+
+        $start = $goal['start_date'] ?: null;
+        $end = $goal['end_date'] ?: null;
+        // default window: last 30 days if no start/end
+        if (!$start && !$end) {
+            $start = date('Y-m-d', strtotime('-29 days'));
+            $end = date('Y-m-d');
+        } elseif ($start && !$end) {
+            $end = date('Y-m-d');
+        } elseif (!$start && $end) {
+            $start = date('Y-m-d', strtotime('-29 days'));
+        }
+
+        // determine participants: if group goal use group members; else use users who have checkins or the goal creator
+        $participants = [];
+        if (!empty($goal['group_id'])) {
+            $stmtP = $pdo->prepare('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON gm.user_id = u.id WHERE gm.group_id = ?');
+            $stmtP->execute([$goal['group_id']]);
+            $participants = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            // users who checked in
+            $stmtP = $pdo->prepare('SELECT DISTINCT u.id, u.name, u.email FROM users u JOIN checkins c ON c.user_id = u.id WHERE c.goal_id = ?');
+            $stmtP->execute([$goalId]);
+            $participants = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+            // include creator if no participants
+            if (empty($participants)) {
+                $stmtC = $pdo->prepare('SELECT u.id, u.name, u.email FROM users u JOIN goals g ON g.created_by = u.id WHERE g.id = ?');
+                $stmtC->execute([$goalId]);
+                $c = $stmtC->fetch(PDO::FETCH_ASSOC);
+                if ($c) $participants[] = $c;
+            }
+        }
+
+        $stats = [];
+        foreach ($participants as $p) {
+            // count checkins and sum value in window
+            $stmtS = $pdo->prepare('SELECT COUNT(*) AS cnt, COALESCE(SUM(value),0) AS total_value FROM checkins WHERE goal_id = ? AND user_id = ? AND date BETWEEN ? AND ?');
+            $stmtS->execute([$goalId, $p['id'], $start, $end]);
+            $row = $stmtS->fetch(PDO::FETCH_ASSOC);
+            $cnt = (int)$row['cnt'];
+            $total = (float)$row['total_value'];
+            // percentage (if target_value provided, compare total or count depending on cadence)
+            $pct = null;
+            if (!empty($goal['target_value'])) {
+                if (in_array($goal['cadence'], ['daily', 'weekly'])) {
+                    $pct = min(100, round(($cnt / (int)$goal['target_value']) * 100));
+                } else {
+                    $pct = min(100, round(($total / (float)$goal['target_value']) * 100));
+                }
+            }
+            $stats[] = ['user_id' => (int)$p['id'], 'name' => $p['name'], 'email' => $p['email'], 'checkins' => $cnt, 'total_value' => $total, 'pct' => $pct];
+        }
+
+        // sort by checkins desc then total_value
+        usort($stats, function ($a, $b) {
+            if ($b['checkins'] === $a['checkins']) return $b['total_value'] <=> $a['total_value'];
+            return $b['checkins'] <=> $a['checkins'];
+        });
+
+        jsonOk(['goal' => $goal, 'start' => $start, 'end' => $end, 'stats' => $stats]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error computing stats: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // ----------------------------
 // Activity endpoint
 // ----------------------------
+
+// ----------------------------
+// Goal templates
+// ----------------------------
+
+// GET /api/templates -> list available templates
+if ($method === 'GET' && preg_match('#^templates$#', $path)) {
+    $stmt = $pdo->prepare('SELECT id, title, description, cadence, unit, start_offset_days, duration_days FROM goal_templates ORDER BY created_at DESC');
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    jsonOk(['templates' => $rows]);
+    exit;
+}
+
+// GET /api/templates/{id} -> get template details
+if ($method === 'GET' && preg_match('#^templates/(\d+)$#', $path, $m)) {
+    $tid = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT id, title, description, cadence, unit, start_offset_days, duration_days FROM goal_templates WHERE id = ?');
+    $stmt->execute([$tid]);
+    $t = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$t) {
+        jsonErr('Template not found', 404);
+        exit;
+    }
+    jsonOk(['template' => $t]);
+    exit;
+}
+
+// POST /api/templates/{id}/clone -> clone template into a new goal for current user
+// optional JSON body: { group_id: int|null, overrides: { title, description, cadence, unit, start_date, end_date } }
+if ($method === 'POST' && preg_match('#^templates/(\d+)/clone$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $tid = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM goal_templates WHERE id = ?');
+        $stmt->execute([$tid]);
+        $t = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$t) {
+            jsonErr('Template not found', 404);
+            exit;
+        }
+
+        $groupId = isset($data['group_id']) ? (int)$data['group_id'] : null;
+        $over = $data['overrides'] ?? [];
+
+        // determine fields using overrides if provided
+        $title = $over['title'] ?? $t['title'];
+        $description = $over['description'] ?? $t['description'];
+        $cadence = in_array($over['cadence'] ?? $t['cadence'], ['daily', 'weekly', 'monthly']) ? ($over['cadence'] ?? $t['cadence']) : 'daily';
+        $unit = $over['unit'] ?? $t['unit'];
+
+        // start_date: if override provided, use it; else use offset days
+        if (!empty($over['start_date'])) {
+            $start_date = $over['start_date'];
+        } else {
+            $start = new DateTime();
+            if (!empty($t['start_offset_days'])) $start->modify('+' . (int)$t['start_offset_days'] . ' days');
+            $start_date = $start->format('Y-m-d');
+        }
+
+        // end_date: override or compute from duration_days
+        if (!empty($over['end_date'])) {
+            $end_date = $over['end_date'];
+        } elseif (!empty($t['duration_days'])) {
+            $end = new DateTime($start_date);
+            $end->modify('+' . ((int)$t['duration_days'] - 1) . ' days');
+            $end_date = $end->format('Y-m-d');
+        } else {
+            $end_date = null;
+        }
+
+        // persist into goals
+        if (!empty($groupId)) {
+            $stmtIns = $pdo->prepare('INSERT INTO goals (title, description, created_by, group_id, cadence, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmtIns->execute([$title, $description, $_SESSION['user_id'], $groupId, $cadence, $unit ?: null, $start_date, $end_date]);
+        } else {
+            $stmtIns = $pdo->prepare('INSERT INTO goals (title, description, created_by, cadence, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $stmtIns->execute([$title, $description, $_SESSION['user_id'], $cadence, $unit ?: null, $start_date, $end_date]);
+        }
+        $gid = (int)$pdo->lastInsertId();
+        // activity
+        try {
+            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, goal_id, action, meta) VALUES (?, ?, ?, ?, ?)');
+            $stmtAct->execute([$_SESSION['user_id'], $groupId ?: null, $gid, 'goal_created_from_template', json_encode(['template_id' => $tid])]);
+        } catch (Exception $e) {
+        }
+
+        jsonOk(['goal_id' => $gid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error cloning template: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
 
 // GET /api/activity -> recent activity relevant to user (their groups + their actions)
 if ($method === 'GET' && preg_match('#^activity$#', $path)) {

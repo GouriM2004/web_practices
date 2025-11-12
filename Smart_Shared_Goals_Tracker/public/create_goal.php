@@ -35,6 +35,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="card">
     <div class="card-body">
         <h2>Create Goal</h2>
+        <div class="mb-3">
+            <label class="form-label">Start from a template (optional)</label>
+            <select id="templatePicker" class="form-select">
+                <option value="">-- Choose a template --</option>
+            </select>
+            <div id="templateHelp" class="form-text">Pick a template to prefill the form. You can still edit values before creating.</div>
+        </div>
         <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
         <form method="post">
             <?php if ($groupId): ?>
@@ -42,11 +49,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
             <div class="mb-3">
                 <label class="form-label">Title</label>
-                <input name="title" class="form-control" required>
+                <input name="title" id="title" class="form-control" required>
             </div>
             <div class="mb-3">
                 <label class="form-label">Description</label>
-                <textarea name="description" class="form-control"></textarea>
+                <textarea name="description" id="description" class="form-control"></textarea>
             </div>
             <div class="mb-3">
                 <label class="form-label">Cadence</label>
@@ -58,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <div class="mb-3">
                 <label class="form-label">Unit (optional)</label>
-                <input name="unit" class="form-control">
+                <input name="unit" id="unit" class="form-control">
             </div>
             <div class="mb-3 row">
                 <div class="col">
@@ -74,5 +81,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
     </div>
 </div>
+
+<script>
+    // load templates and wire picker to prefill the form
+    (async function() {
+        try {
+            const res = await fetch('api.php/templates', {
+                credentials: 'include'
+            });
+            if (!res.ok) return;
+            const payload = await res.json();
+            const sel = document.getElementById('templatePicker');
+            if (!payload.templates || !payload.templates.length) return;
+            payload.templates.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.title + (t.cadence ? ' (' + t.cadence + ')' : '');
+                sel.appendChild(opt);
+            });
+
+            sel.addEventListener('change', async function() {
+                const tid = this.value;
+                if (!tid) return;
+                const r = await fetch('api.php/templates/' + encodeURIComponent(tid), {
+                    credentials: 'include'
+                });
+                if (!r.ok) return;
+                const p = await r.json();
+                const t = p.template;
+                if (!t) return;
+                // prefill fields
+                document.getElementById('title').value = t.title || document.getElementById('title').value;
+                document.getElementById('description').value = t.description || document.getElementById('description').value;
+                document.querySelector('select[name="cadence"]').value = t.cadence || document.querySelector('select[name="cadence"]').value;
+                document.getElementById('unit').value = t.unit || document.getElementById('unit').value;
+            });
+        } catch (e) {
+            console.warn('Failed to load templates', e);
+        }
+    })();
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
