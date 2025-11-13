@@ -1,5 +1,6 @@
 <?php
 $page_title = 'Goal';
+$page_scripts = ['assets/js/chat.js'];
 include __DIR__ . '/includes/header.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['user_id'])) {
@@ -83,6 +84,17 @@ $heatDates = array_map(function ($d) {
                 <hr>
                 <div id="teamProgress" class="mt-3">
                     <!-- Team progress & leaderboard (populated by JS) -->
+                </div>
+                <hr>
+                <h6>Discussion</h6>
+                <div id="goalChat" class="card" data-goal-id="<?= $id ?>">
+                    <div class="card-body">
+                        <div id="messagesContainer" style="max-height:240px; overflow:auto;" class="mb-2"></div>
+                        <div class="input-group">
+                            <input id="chatInput" type="text" class="form-control" placeholder="Write a message to the group...">
+                            <button id="sendChatBtn" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

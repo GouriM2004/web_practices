@@ -26,6 +26,92 @@ if ($path === 'api.php') {
 }
 
 // simple helpers
+// ------------------
+// Chat / Messages
+// POST /api/threads  { group_id, goal_id, parent_id?, body }
+// GET  /api/threads?group_id=...&goal_id=...&since=YYYY-mm-dd HH:MM:SS
+// ------------------
+if ($method === 'POST' && $path === 'threads') {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $group_id = isset($data['group_id']) ? (int)$data['group_id'] : null;
+    $goal_id = isset($data['goal_id']) ? (int)$data['goal_id'] : null;
+    $parent_id = isset($data['parent_id']) ? (int)$data['parent_id'] : null;
+    $body = trim($data['body'] ?? '');
+    if ($body === '') {
+        jsonErr('Empty message', 422);
+        exit;
+    }
+
+    // permission checks
+    if ($group_id) {
+        $stmt = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmt->execute([$group_id, $uid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Not a member of group', 403);
+            exit;
+        }
+    }
+    if ($goal_id) {
+        $stmt = $pdo->prepare('SELECT g.id FROM goals g LEFT JOIN group_members gm ON gm.group_id = g.group_id WHERE g.id = ? AND (g.created_by = ? OR gm.user_id = ?)');
+        $stmt->execute([$goal_id, $uid, $uid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Not allowed on this goal', 403);
+            exit;
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO messages (group_id, goal_id, user_id, parent_id, body) VALUES (?, ?, ?, ?, ?)');
+    $stmt->execute([$group_id, $goal_id, $uid, $parent_id, $body]);
+    $msg_id = (int)$pdo->lastInsertId();
+    $stmt = $pdo->prepare('SELECT m.*, u.name as user_name, u.email as user_email FROM messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?');
+    $stmt->execute([$msg_id]);
+    $msg = $stmt->fetch(PDO::FETCH_ASSOC);
+    jsonOk(['message' => $msg]);
+    exit;
+}
+
+if ($method === 'GET' && $path === 'threads') {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $group_id = isset($_GET['group_id']) ? (int)$_GET['group_id'] : null;
+    $goal_id = isset($_GET['goal_id']) ? (int)$_GET['goal_id'] : null;
+    $since = isset($_GET['since']) ? $_GET['since'] : null;
+
+    $params = [];
+    $sql = 'SELECT m.*, u.name as user_name, u.email as user_email FROM messages m JOIN users u ON u.id = m.user_id WHERE 1=1 ';
+    if ($group_id) {
+        $stmt = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmt->execute([$group_id, $uid]);
+        if (!$stmt->fetchColumn()) {
+            jsonErr('Not a member of group', 403);
+            exit;
+        }
+        $sql .= ' AND m.group_id = ?';
+        $params[] = $group_id;
+    }
+    if ($goal_id) {
+        $sql .= ' AND m.goal_id = ?';
+        $params[] = $goal_id;
+    }
+    if ($since) {
+        $sql .= ' AND m.created_at > ?';
+        $params[] = $since;
+    }
+    $sql .= ' ORDER BY m.created_at ASC LIMIT 100';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    jsonOk(['messages' => $rows]);
+    exit;
+}
 function jsonOk($data = [])
 {
     echo json_encode(array_merge(['status' => 'ok'], $data));

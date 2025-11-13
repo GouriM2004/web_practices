@@ -188,3 +188,25 @@ INSERT INTO goal_templates (title, description, cadence, unit, start_offset_days
 ('30-day fitness challenge', 'Daily workout for 30 days. Try to complete at least 20 minutes each day.', 'daily', 'minutes', 0, 30),
 ('Read 10 pages a day', 'Read at least 10 pages every day to build a reading habit.', 'daily', 'pages', 0, NULL)
 ON DUPLICATE KEY UPDATE title = VALUES(title);
+
+-- ==============================
+-- MESSAGES / CHAT THREADS
+-- Messages can be linked to a group or a goal and optionally threaded (parent_id)
+-- ==============================
+CREATE TABLE IF NOT EXISTS messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  group_id INT DEFAULT NULL,
+  goal_id INT DEFAULT NULL,
+  user_id INT NOT NULL,
+  parent_id INT DEFAULT NULL,
+  body TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_id) REFERENCES messages(id) ON DELETE CASCADE,
+  INDEX idx_group (group_id),
+  INDEX idx_goal (goal_id),
+  INDEX idx_user (user_id),
+  INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

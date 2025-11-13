@@ -1,6 +1,6 @@
 <?php
 $page_title = 'Group';
-$page_scripts = ['assets/js/group.js'];
+$page_scripts = ['assets/js/group.js', 'assets/js/chat.js'];
 include __DIR__ . '/includes/header.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['user_id'])) {
@@ -204,6 +204,19 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php endif; ?>
 
             <p class="mt-3"><a href="groups.php">Back to groups</a></p>
+            <?php if ($membership): ?>
+                <hr>
+                <h4>Group chat</h4>
+                <div id="groupChat" class="card mb-3" data-group-id="<?= $gid ?>">
+                    <div class="card-body">
+                        <div id="messagesContainer" style="max-height:300px; overflow:auto;" class="mb-2"></div>
+                        <div class="input-group">
+                            <input id="chatInput" type="text" class="form-control" placeholder="Write a message...">
+                            <button id="sendChatBtn" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 
