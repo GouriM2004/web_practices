@@ -210,3 +210,15 @@ CREATE TABLE IF NOT EXISTS messages (
   INDEX idx_user (user_id),
   INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
+-- USER XP / LEVELS
+-- Tracks accumulated XP and computed level for each user
+-- ==============================
+CREATE TABLE IF NOT EXISTS user_xp (
+  user_id INT PRIMARY KEY,
+  xp_total INT DEFAULT 0,
+  level INT DEFAULT 0,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

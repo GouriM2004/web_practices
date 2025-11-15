@@ -261,6 +261,22 @@ if ($method === 'POST' && preg_match('#^goals/(\d+)/checkins$#', $path, $m)) {
         $streak = $streakSvc->updateStreak($_SESSION['user_id'], $goalId, $date);
         $badges = $badgeSvc->evaluate($_SESSION['user_id'], $goalId);
 
+        // Award XP for a successful check-in
+        try {
+            $xpAward = 10; // points per check-in (tunable)
+            $stmtXp = $pdo->prepare('INSERT INTO user_xp (user_id, xp_total, level, updated_at) VALUES (?, ?, 0, NOW()) ON DUPLICATE KEY UPDATE xp_total = xp_total + ?, updated_at = NOW()');
+            $stmtXp->execute([$_SESSION['user_id'], $xpAward, $xpAward]);
+            // recompute level: simple rule: 1 level per 100 XP
+            $stmtGetXp = $pdo->prepare('SELECT xp_total FROM user_xp WHERE user_id = ?');
+            $stmtGetXp->execute([$_SESSION['user_id']]);
+            $xpTotal = (int)$stmtGetXp->fetchColumn();
+            $newLevel = (int)floor($xpTotal / 100);
+            $stmtUpdLevel = $pdo->prepare('UPDATE user_xp SET level = ? WHERE user_id = ?');
+            $stmtUpdLevel->execute([$newLevel, $_SESSION['user_id']]);
+        } catch (Exception $e) {
+            // don't block on XP awarding
+        }
+
         // log activity: created check-in
         try {
             $stmtGoalGroup = $pdo->prepare('SELECT group_id FROM goals WHERE id = ?');
@@ -274,7 +290,7 @@ if ($method === 'POST' && preg_match('#^goals/(\d+)/checkins$#', $path, $m)) {
         }
 
         $pdo->commit();
-        jsonOk(['checkin_id' => $cid, 'updated_streak' => $streak, 'awarded_badges' => $badges]);
+        jsonOk(['checkin_id' => $cid, 'updated_streak' => $streak, 'awarded_badges' => $badges, 'awarded_xp' => $xpAward ?? 0, 'new_level' => $newLevel ?? null]);
         exit;
     } catch (\Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -351,6 +367,21 @@ if ($method === 'POST' && preg_match('#^sync$#', $path)) {
             $streak = $streakSvc->updateStreak($_SESSION['user_id'], $goalId, $date);
             $badges = $badgeSvc->evaluate($_SESSION['user_id'], $goalId);
 
+            // Award XP for this inserted check-in
+            try {
+                $xpAward = 10;
+                $stmtXp = $pdo->prepare('INSERT INTO user_xp (user_id, xp_total, level, updated_at) VALUES (?, ?, 0, NOW()) ON DUPLICATE KEY UPDATE xp_total = xp_total + ?, updated_at = NOW()');
+                $stmtXp->execute([$_SESSION['user_id'], $xpAward, $xpAward]);
+                $stmtGetXp = $pdo->prepare('SELECT xp_total FROM user_xp WHERE user_id = ?');
+                $stmtGetXp->execute([$_SESSION['user_id']]);
+                $xpTotal = (int)$stmtGetXp->fetchColumn();
+                $newLevel = (int)floor($xpTotal / 100);
+                $stmtUpdLevel = $pdo->prepare('UPDATE user_xp SET level = ? WHERE user_id = ?');
+                $stmtUpdLevel->execute([$newLevel, $_SESSION['user_id']]);
+            } catch (Exception $e) {
+                // ignore XP errors
+            }
+
             // log activity for this inserted check-in
             try {
                 $stmtGoalGroup = $pdo->prepare('SELECT group_id FROM goals WHERE id = ?');
@@ -363,7 +394,7 @@ if ($method === 'POST' && preg_match('#^sync$#', $path)) {
                 // ignore activity logging errors
             }
 
-            $accepted[] = ['client_idempotency_key' => $clientKey, 'checkin_id' => $cid, 'awarded_badges' => $badges, 'updated_streak' => $streak];
+            $accepted[] = ['client_idempotency_key' => $clientKey, 'checkin_id' => $cid, 'awarded_badges' => $badges, 'updated_streak' => $streak, 'awarded_xp' => $xpAward ?? 0, 'new_level' => $newLevel ?? null];
         }
 
         $pdo->commit();
@@ -390,6 +421,19 @@ if ($method === 'GET' && preg_match('#^me$#', $path)) {
         unset($_SESSION['user_id']);
         jsonErr('Not authenticated', 401);
         exit;
+    }
+    // attach XP info if available
+    try {
+        $stmtXp = $pdo->prepare('SELECT xp_total, level FROM user_xp WHERE user_id = ?');
+        $stmtXp->execute([$_SESSION['user_id']]);
+        $xpRow = $stmtXp->fetch(PDO::FETCH_ASSOC);
+        if ($xpRow) {
+            $user['xp'] = ['xp_total' => (int)$xpRow['xp_total'], 'level' => (int)$xpRow['level']];
+        } else {
+            $user['xp'] = ['xp_total' => 0, 'level' => 0];
+        }
+    } catch (Exception $e) {
+        $user['xp'] = ['xp_total' => 0, 'level' => 0];
     }
     jsonOk(['user' => $user]);
     exit;
@@ -461,6 +505,76 @@ if ($method === 'GET' && preg_match('#^groups$#', $path)) {
     $publicGroups = $stmt2->fetchAll(PDO::FETCH_ASSOC);
 
     jsonOk(['member_groups' => $memberGroups, 'public_groups' => $publicGroups]);
+    exit;
+}
+
+// GET /api/groups/{id}/leaderboard?period=weekly|monthly&metric=checkins|days|completed_goals
+if ($method === 'GET' && preg_match('#^groups/(\d+)/leaderboard$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $groupId = (int)$m[1];
+    $period = $_GET['period'] ?? 'weekly';
+    $metric = $_GET['metric'] ?? 'checkins';
+
+    // compute date range
+    $end = date('Y-m-d');
+    if ($period === 'monthly') {
+        $start = date('Y-m-d', strtotime('-30 days'));
+    } else { // default weekly
+        $start = date('Y-m-d', strtotime('-7 days'));
+    }
+
+    // base query: aggregate checkins per user within date range for goals in this group
+    // We'll return both 'checkins' (count) and 'days' (distinct active days). Badges list via GROUP_CONCAT.
+    $sql = "SELECT u.id AS user_id, u.name, u.email,
+        COUNT(c.id) AS checkins,
+        COUNT(DISTINCT c.date) AS days_active,
+        GROUP_CONCAT(DISTINCT b.slug ORDER BY ub.awarded_at DESC SEPARATOR ',') AS badges
+        FROM users u
+        JOIN checkins c ON c.user_id = u.id
+        JOIN goals g ON g.id = c.goal_id AND g.group_id = ?
+        LEFT JOIN user_badges ub ON ub.user_id = u.id
+        LEFT JOIN badges b ON b.id = ub.badge_id
+        WHERE c.date BETWEEN ? AND ?
+        GROUP BY u.id
+    ";
+
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$groupId, $start, $end]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        jsonErr('Error computing leaderboard: ' . $e->getMessage(), 500);
+        exit;
+    }
+
+    // compute ranking value depending on requested metric
+    foreach ($rows as &$r) {
+        $r['checkins'] = (int)$r['checkins'];
+        $r['days_active'] = (int)$r['days_active'];
+        $r['badges'] = $r['badges'] ? explode(',', $r['badges']) : [];
+        if ($metric === 'days') $r['score'] = $r['days_active'];
+        else $r['score'] = $r['checkins'];
+    }
+    unset($r);
+
+    // sort by score desc
+    usort($rows, function ($a, $b) {
+        return $b['score'] <=> $a['score'];
+    });
+
+    // attach rank and limit to top 50
+    $rows = array_slice($rows, 0, 50);
+    $ranked = [];
+    $rank = 1;
+    foreach ($rows as $r) {
+        $r['rank'] = $rank++;
+        $ranked[] = $r;
+    }
+
+    jsonOk(['period' => $period, 'metric' => $metric, 'start' => $start, 'end' => $end, 'leaders' => $ranked]);
     exit;
 }
 
