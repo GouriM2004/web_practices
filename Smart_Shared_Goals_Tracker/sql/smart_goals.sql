@@ -222,3 +222,45 @@ CREATE TABLE IF NOT EXISTS user_xp (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
+-- CHALLENGES
+-- Time-limited challenges that users can join
+-- ==============================
+CREATE TABLE IF NOT EXISTS challenges (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  group_id INT DEFAULT NULL,
+  created_by INT DEFAULT NULL,
+  start_date DATE DEFAULT NULL,
+  duration_days INT NOT NULL DEFAULT 30,
+  cadence ENUM('daily','weekly','monthly') DEFAULT 'daily',
+  unit VARCHAR(50) DEFAULT NULL,
+  target_value INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (group_id) REFERENCES groups_tbl(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS challenge_participants (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  challenge_id INT NOT NULL,
+  user_id INT NOT NULL,
+  joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  goal_id INT DEFAULT NULL,
+  UNIQUE KEY (challenge_id, user_id),
+  FOREIGN KEY (challenge_id) REFERENCES challenges(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- optional mapping if multiple goals per challenge needed in future
+CREATE TABLE IF NOT EXISTS challenge_goals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  challenge_id INT NOT NULL,
+  goal_id INT NOT NULL,
+  FOREIGN KEY (challenge_id) REFERENCES challenges(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  UNIQUE KEY (challenge_id, goal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

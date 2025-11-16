@@ -1,6 +1,6 @@
 <?php
 $page_title = 'Group';
-$page_scripts = ['assets/js/group.js', 'assets/js/chat.js'];
+$page_scripts = ['assets/js/group.js', 'assets/js/chat.js', 'assets/js/leaderboard.js', 'assets/js/challenges.js'];
 include __DIR__ . '/includes/header.php';
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['user_id'])) {
@@ -213,6 +213,47 @@ $goals = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <div class="input-group">
                             <input id="chatInput" type="text" class="form-control" placeholder="Write a message...">
                             <button id="sendChatBtn" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($membership): ?>
+                <hr>
+                <h4>Leaderboard</h4>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex gap-2 mb-2">
+                            <select id="leaderboardPeriod" class="form-select form-select-sm" style="width:150px;">
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                            <select id="leaderboardMetric" class="form-select form-select-sm" style="width:220px;">
+                                <option value="checkins">Check-ins</option>
+                                <option value="days">Active days</option>
+                            </select>
+                            <button id="refreshLeaderboard" class="btn btn-sm btn-outline-primary">Refresh</button>
+                        </div>
+                        <div id="leaderboardContainer">
+                            <div class="text-muted">Loading leaderboard...</div>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($membership): ?>
+                <hr>
+                <h4>Challenges</h4>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="small text-muted">Group challenges and time-limited events</div>
+                            <?php if (in_array($membership, ['owner', 'admin'])): ?>
+                                <button id="createChallengeBtn" class="btn btn-sm btn-outline-success">Create Challenge</button>
+                            <?php endif; ?>
+                        </div>
+                        <div id="challengesList">
+                            <div class="text-muted">Loading challenges...</div>
                         </div>
                     </div>
                 </div>

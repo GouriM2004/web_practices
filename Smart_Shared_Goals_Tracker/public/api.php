@@ -578,6 +578,178 @@ if ($method === 'GET' && preg_match('#^groups/(\d+)/leaderboard$#', $path, $m)) 
     exit;
 }
 
+// ----------------------------
+// Challenges
+// ----------------------------
+// POST /api/challenges -> create a challenge
+if ($method === 'POST' && preg_match('#^challenges$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    if (empty($data['title']) || empty($data['duration_days'])) {
+        jsonErr('Missing fields', 422);
+        exit;
+    }
+    $title = $data['title'];
+    $desc = $data['description'] ?? null;
+    $groupId = isset($data['group_id']) ? (int)$data['group_id'] : null;
+    $startDate = $data['start_date'] ?? date('Y-m-d');
+    $duration = (int)$data['duration_days'];
+    $cadence = in_array($data['cadence'] ?? 'daily', ['daily', 'weekly', 'monthly']) ? $data['cadence'] : 'daily';
+    $unit = $data['unit'] ?? null;
+    $target = isset($data['target_value']) ? (int)$data['target_value'] : null;
+
+    try {
+        // if group specified, ensure user is a member
+        if ($groupId) {
+            $stmt = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmt->execute([$groupId, $_SESSION['user_id']]);
+            if (!$stmt->fetchColumn()) {
+                jsonErr('Not a member of target group', 403);
+                exit;
+            }
+        }
+        $stmt = $pdo->prepare('INSERT INTO challenges (title, description, group_id, created_by, start_date, duration_days, cadence, unit, target_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$title, $desc, $groupId, $_SESSION['user_id'], $startDate, $duration, $cadence, $unit, $target]);
+        $cid = (int)$pdo->lastInsertId();
+        jsonOk(['challenge_id' => $cid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error creating challenge: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// GET /api/challenges[?group_id=...] -> list challenges
+if ($method === 'GET' && preg_match('#^challenges$#', $path)) {
+    $groupId = isset($_GET['group_id']) ? (int)$_GET['group_id'] : null;
+    try {
+        if ($groupId) {
+            $stmt = $pdo->prepare('SELECT * FROM challenges WHERE group_id = ? ORDER BY created_at DESC');
+            $stmt->execute([$groupId]);
+        } else {
+            $stmt = $pdo->prepare('SELECT * FROM challenges ORDER BY created_at DESC');
+            $stmt->execute([]);
+        }
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        jsonOk(['challenges' => $rows]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error listing challenges: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// POST /api/challenges/{id}/join -> join a challenge (creates a personal goal for user)
+if ($method === 'POST' && preg_match('#^challenges/(\d+)/join$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $challengeId = (int)$m[1];
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM challenges WHERE id = ?');
+        $stmt->execute([$challengeId]);
+        $ch = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$ch) {
+            jsonErr('Challenge not found', 404);
+            exit;
+        }
+
+        // ensure not already participant
+        $stmtChk = $pdo->prepare('SELECT id FROM challenge_participants WHERE challenge_id = ? AND user_id = ?');
+        $stmtChk->execute([$challengeId, $_SESSION['user_id']]);
+        if ($stmtChk->fetchColumn()) {
+            jsonErr('Already joined', 409);
+            exit;
+        }
+
+        // create a goal for this participant to track progress
+        $title = 'Challenge: ' . $ch['title'];
+        $start = $ch['start_date'] ?: date('Y-m-d');
+        $end = date('Y-m-d', strtotime($start . ' + ' . ((int)$ch['duration_days'] - 1) . ' days'));
+        $stmtG = $pdo->prepare('INSERT INTO goals (title, description, created_by, group_id, cadence, target_value, unit, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmtG->execute([$title, $ch['description'], $_SESSION['user_id'], $ch['group_id'], $ch['cadence'], $ch['target_value'], $ch['unit'], $start, $end]);
+        $goalId = (int)$pdo->lastInsertId();
+
+        // map goal to challenge and participant
+        $stmtMap = $pdo->prepare('INSERT INTO challenge_goals (challenge_id, goal_id) VALUES (?, ?)');
+        $stmtMap->execute([$challengeId, $goalId]);
+        $stmtPart = $pdo->prepare('INSERT INTO challenge_participants (challenge_id, user_id, goal_id) VALUES (?, ?, ?)');
+        $stmtPart->execute([$challengeId, $_SESSION['user_id'], $goalId]);
+
+        jsonOk(['challenge_id' => $challengeId, 'goal_id' => $goalId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error joining challenge: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// GET /api/challenges/{id}/stats -> participation and success metrics
+if ($method === 'GET' && preg_match('#^challenges/(\d+)/stats$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $challengeId = (int)$m[1];
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM challenges WHERE id = ?');
+        $stmt->execute([$challengeId]);
+        $ch = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$ch) {
+            jsonErr('Not found', 404);
+            exit;
+        }
+
+        $duration = (int)$ch['duration_days'];
+        $start = $ch['start_date'] ?: null;
+        // fetch participants and compute progress by counting distinct checkin days for their goal
+        $stmt = $pdo->prepare('SELECT cp.user_id, cp.goal_id, u.name, u.email FROM challenge_participants cp JOIN users u ON u.id = cp.user_id WHERE cp.challenge_id = ?');
+        $stmt->execute([$challengeId]);
+        $parts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = [];
+        $totalPct = 0;
+        $successCount = 0;
+        foreach ($parts as $p) {
+            if (!$p['goal_id']) {
+                $pct = 0;
+            } else {
+                if ($start) {
+                    $stmtCnt = $pdo->prepare('SELECT COUNT(DISTINCT date) FROM checkins WHERE goal_id = ? AND user_id = ? AND date BETWEEN ? AND ?');
+                    $stmtCnt->execute([$p['goal_id'], $p['user_id'], $start, date('Y-m-d', strtotime($start . ' + ' . ($duration - 1) . ' days'))]);
+                } else {
+                    // fallback: count within goal dates
+                    $stmtGoal = $pdo->prepare('SELECT start_date, end_date FROM goals WHERE id = ?');
+                    $stmtGoal->execute([$p['goal_id']]);
+                    $g = $stmtGoal->fetch(PDO::FETCH_ASSOC);
+                    if ($g && $g['start_date'] && $g['end_date']) {
+                        $stmtCnt = $pdo->prepare('SELECT COUNT(DISTINCT date) FROM checkins WHERE goal_id = ? AND user_id = ? AND date BETWEEN ? AND ?');
+                        $stmtCnt->execute([$p['goal_id'], $p['user_id'], $g['start_date'], $g['end_date']]);
+                    } else {
+                        $stmtCnt = $pdo->prepare('SELECT COUNT(DISTINCT date) FROM checkins WHERE goal_id = ? AND user_id = ?');
+                        $stmtCnt->execute([$p['goal_id'], $p['user_id']]);
+                    }
+                }
+                $countDays = (int)$stmtCnt->fetchColumn();
+                $pct = $duration > 0 ? round(($countDays / $duration) * 100, 1) : 0;
+            }
+            $success = $pct >= 80.0; // considered successful if >=80%
+            $totalPct += $pct;
+            if ($success) $successCount++;
+            $results[] = ['user_id' => (int)$p['user_id'], 'name' => $p['name'], 'email' => $p['email'], 'goal_id' => $p['goal_id'], 'days_active' => $countDays ?? 0, 'pct' => $pct, 'success' => $success];
+        }
+        $avg = count($parts) ? round($totalPct / count($parts), 1) : 0;
+        jsonOk(['challenge_id' => $challengeId, 'participants' => $results, 'average_pct' => $avg, 'success_count' => $successCount, 'total_participants' => count($parts)]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error computing stats: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // POST /api/groups -> create group
 if ($method === 'POST' && preg_match('#^groups$#', $path)) {
     if (empty($_SESSION['user_id'])) {
