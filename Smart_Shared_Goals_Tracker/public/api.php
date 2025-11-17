@@ -407,6 +407,46 @@ if ($method === 'POST' && preg_match('#^sync$#', $path)) {
     }
 }
 
+// POST /api/goals/{id}/visibility -> change visibility (owner or group admin only)
+if ($method === 'POST' && preg_match('#^goals/(\d+)/visibility$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $vis = $data['visibility'] ?? null;
+    if ($vis !== 'public' && $vis !== 'private') {
+        jsonErr('Invalid visibility', 422);
+        exit;
+    }
+    // load goal
+    $stmt = $pdo->prepare('SELECT created_by, group_id FROM goals WHERE id = ?');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = false;
+    if ((int)$g['created_by'] === $uid) $allowed = true;
+    if (!$allowed && $g['group_id']) {
+        $stmt = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmt->execute([$g['group_id'], $uid]);
+        $role = $stmt->fetchColumn();
+        if (in_array($role, ['admin', 'owner'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    $stmt = $pdo->prepare('UPDATE goals SET visibility = ?, updated_at = NOW() WHERE id = ?');
+    $stmt->execute([$vis, $goalId]);
+    jsonOk(['visibility' => $vis]);
+    exit;
+}
+
 // GET /api/me -> current user (session)
 if ($method === 'GET' && preg_match('#^me$#', $path)) {
     if (empty($_SESSION['user_id'])) {
@@ -529,21 +569,26 @@ if ($method === 'GET' && preg_match('#^groups/(\d+)/leaderboard$#', $path, $m)) 
     // base query: aggregate checkins per user within date range for goals in this group
     // We'll return both 'checkins' (count) and 'days' (distinct active days). Badges list via GROUP_CONCAT.
     $sql = "SELECT u.id AS user_id, u.name, u.email,
-        COUNT(c.id) AS checkins,
-        COUNT(DISTINCT c.date) AS days_active,
-        GROUP_CONCAT(DISTINCT b.slug ORDER BY ub.awarded_at DESC SEPARATOR ',') AS badges
-        FROM users u
-        JOIN checkins c ON c.user_id = u.id
-        JOIN goals g ON g.id = c.goal_id AND g.group_id = ?
-        LEFT JOIN user_badges ub ON ub.user_id = u.id
-        LEFT JOIN badges b ON b.id = ub.badge_id
-        WHERE c.date BETWEEN ? AND ?
-        GROUP BY u.id
-    ";
+            COUNT(c.id) AS checkins,
+            COUNT(DISTINCT c.date) AS days_active,
+            GROUP_CONCAT(DISTINCT b.slug ORDER BY ub.awarded_at DESC SEPARATOR ',') AS badges
+            FROM users u
+            JOIN checkins c ON c.user_id = u.id
+            JOIN goals g ON g.id = c.goal_id AND g.group_id = ?
+            LEFT JOIN user_badges ub ON ub.user_id = u.id
+            LEFT JOIN badges b ON b.id = ub.badge_id
+            WHERE c.date BETWEEN ? AND ?
+              AND (
+                  g.visibility = 'public'
+                  OR g.created_by = ?
+                  OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = ? AND gm.user_id = ? AND gm.role IN ('owner','admin'))
+              )
+            GROUP BY u.id
+        ";
 
     try {
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$groupId, $start, $end]);
+        $stmt->execute([$groupId, $start, $end, $uid, $groupId, $uid]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         jsonErr('Error computing leaderboard: ' . $e->getMessage(), 500);

@@ -23,6 +23,17 @@ if (!$goal) {
     include __DIR__ . '/includes/footer.php';
     exit;
 }
+// determine whether current user can change visibility (owner or group admin)
+$canEditVisibility = false;
+$goalVisibility = $goal['visibility'] ?? 'private';
+if ((int)$goal['created_by'] === (int)$userId) {
+    $canEditVisibility = true;
+} elseif (!empty($goal['group_id'])) {
+    $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+    $stmtRole->execute([$goal['group_id'], $userId]);
+    $role = $stmtRole->fetchColumn();
+    if (in_array($role, ['admin', 'owner'])) $canEditVisibility = true;
+}
 // recompute streaks for current user and persist (ensure goal_user_meta is up-to-date)
 try {
     $streakSvc = new \Services\StreakService($pdo);
@@ -75,6 +86,13 @@ $heatDates = array_map(function ($d) {
                     <div>Consistency (30d): <strong id="consistency">—</strong></div>
                     <div>Current streak: <strong id="currentStreak">—</strong></div>
                     <div>Longest streak: <strong id="longestStreak">—</strong></div>
+                </div>
+                <hr>
+                <div class="mb-2">
+                    Visibility: <span id="goalVisibilityBadge" class="badge <?= $goalVisibility === 'public' ? 'bg-success' : 'bg-secondary' ?>"><?= htmlspecialchars(ucfirst($goalVisibility)) ?></span>
+                    <?php if ($canEditVisibility): ?>
+                        <button id="toggleVisibilityBtn" class="btn btn-sm btn-outline-primary ms-2"><?= $goalVisibility === 'public' ? 'Make private' : 'Make public' ?></button>
+                    <?php endif; ?>
                 </div>
                 <hr>
                 <h6>Streak heatmap (past year)</h6>
@@ -312,5 +330,43 @@ $heatDates = array_map(function ($d) {
         } catch (e) {
             console.warn('Failed to load team stats', e);
         }
+    })();
+
+    // Visibility toggle handler
+    (function() {
+        const visBadge = document.getElementById('goalVisibilityBadge');
+        const toggleBtn = document.getElementById('toggleVisibilityBtn');
+        if (!toggleBtn || !visBadge) return;
+        toggleBtn.addEventListener('click', async () => {
+            const current = visBadge.textContent.trim().toLowerCase();
+            const newVis = current === 'public' ? 'private' : 'public';
+            try {
+                const r = await fetch('api.php/goals/<?= $id ?>/visibility', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        visibility: newVis
+                    })
+                });
+                const payload = await r.json();
+                if (!r.ok) {
+                    if (window.UI && UI.toast) UI.toast(payload.error || 'Failed to update visibility');
+                    else alert(payload.error || 'Failed to update visibility');
+                    return;
+                }
+                const v = payload.visibility;
+                visBadge.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+                visBadge.className = v === 'public' ? 'badge bg-success' : 'badge bg-secondary';
+                toggleBtn.textContent = v === 'public' ? 'Make private' : 'Make public';
+                if (window.UI && UI.toast) UI.toast('Visibility updated');
+            } catch (e) {
+                console.error(e);
+                if (window.UI && UI.toast) UI.toast('Network error');
+                else alert('Network error');
+            }
+        });
     })();
 </script>
