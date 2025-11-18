@@ -167,8 +167,8 @@ $totalStmt = $pdo->prepare("SELECT COUNT(*) FROM complaints {$whereSql}");
 $totalStmt->execute($params);
 $total = (int)$totalStmt->fetchColumn();
 $stmt = $pdo->prepare("SELECT * FROM complaints {$whereSql} ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
-foreach ($params as $k=>$v) { $$stmt->bindValue($k, $v); }
-$$stmt->bindValue(':limit', (int)$perPage, PDO::PARAM_INT);
+foreach ($params as $k=>$v) { $stmt->bindValue($k, $v); }
+$stmt->bindValue(':limit', (int)$perPage, PDO::PARAM_INT);
 $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
 $stmt->execute();
 $complaints = $stmt->fetchAll();
