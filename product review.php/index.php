@@ -68,18 +68,57 @@ function avg_rating($reviews) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        :root{--primary:#0d6efd;--muted:#6c757d}
-        body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:#f6f8fb}
-        .product-card{border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,0.06);background:white}
-        .product-image{height:200px;object-fit:cover;width:100%}
-        .star{color:#eab308}
-        .rating-pill{background:#f8fafc;border:1px solid #eef2ff;padding:6px 10px;border-radius:999px}
-        .review-box{background:#fff;border:1px solid #e6eef8;padding:18px;border-radius:10px}
-        .small-muted{color:var(--muted);font-size:.9rem}
-        .fade-in{animation:fadeIn .5s ease both}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-        .footer{padding:30px 0;text-align:center;color:#94a3b8}
-        @media(max-width:576px){.product-image{height:150px}}
+        :root{
+            --bg:#0f1724;
+            --card:#0b1220;
+            --glass: rgba(255,255,255,0.03);
+            --muted:#94a3b8;
+            --accent:#7c3aed; /* violet */
+            --accent-2:#06b6d4; /* teal */
+            --star:#f59e0b;
+            --surface:#0b1220;
+            --soft-white: rgba(255,255,255,0.96)
+        }
+
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+        *{box-sizing:border-box}
+        body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:linear-gradient(180deg,#071022 0%, #0f1724 100%);color:var(--soft-white);-webkit-font-smoothing:antialiased}
+
+        .navbar{background:transparent;border-bottom:1px solid rgba(255,255,255,0.04)}
+        .navbar-brand{color:var(--accent);font-weight:800}
+
+        main.container{padding-top:44px}
+
+        /* Product grid */
+        .product-card{border-radius:12px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));box-shadow:0 10px 30px rgba(2,6,23,0.65);border:1px solid rgba(255,255,255,0.03)}
+        .product-image{height:220px;object-fit:cover;width:100%;display:block;filter:contrast(1.02) saturate(1.05)}
+        .product-item{transition:transform .28s ease, box-shadow .28s ease}
+        .product-item:hover{transform:translateY(-8px)}
+
+        .rating-pill{background:linear-gradient(90deg, rgba(124,58,237,0.12), rgba(6,182,212,0.06));padding:6px 12px;border-radius:999px;border:1px solid rgba(124,58,237,0.12);color:var(--soft-white);font-weight:700}
+
+        .star{color:var(--star)}
+        .small-muted{color:var(--muted);font-size:.92rem}
+
+        .review-box{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);padding:14px;border-radius:10px}
+
+        /* Form card */
+        .product-card .card-body{background:transparent}
+        form .form-control{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--soft-white)}
+        .form-label{color:var(--soft-white)}
+        .btn-primary{background:linear-gradient(90deg,var(--accent),#4f46e5);border:none}
+        .btn-outline-secondary{border-color:rgba(255,255,255,0.04);color:var(--soft-white);background:transparent}
+
+        hr{border-color:rgba(255,255,255,0.03)}
+
+        .footer{padding:30px 0;text-align:center;color:var(--muted)}
+
+        .filter-btn{background:transparent;color:var(--soft-white);border:1px solid rgba(255,255,255,0.03)}
+        .filter-btn.active{background:linear-gradient(90deg,var(--accent),var(--accent-2));box-shadow:0 6px 20px rgba(99,102,241,0.12);border:none}
+
+        .search-input{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);color:var(--soft-white)}
+
+        @media(max-width:576px){.product-image{height:160px}}
     </style>
 </head>
 <body>
