@@ -9,45 +9,125 @@ $products = [
     ['id' => 4, 'name' => 'Nimbus Smartwatch', 'category' => 'Wearables', 'price' => 199.00, 'image' => 'https://images.unsplash.com/photo-1516574187841-cb9cc2ca948b?w=1200&h=800&fit=crop']
 ];
 
-// Initialize reviews in session (demo)
-if (!isset($_SESSION['reviews'])) {
-    $_SESSION['reviews'] = [
-        1 => [
-            ['name' => 'Priya', 'rating' => 5, 'title' => 'Excellent sound', 'comment' => 'Great bass and battery life.', 'date' => '2025-11-18'],
-            ['name' => 'Aman', 'rating' => 4, 'title' => 'Very good', 'comment' => 'Comfortable but a bit tight.', 'date' => '2025-10-05']
-        ],
-        2 => [
-            ['name' => 'Rina', 'rating' => 5, 'title' => 'Lovely aroma', 'comment' => 'Lasts for many hours, highly recommended.', 'date' => '2025-09-12']
-        ],
-        3 => [],
-        4 => [
-            ['name' => 'Dev', 'rating' => 3, 'title' => 'Good features', 'comment' => 'Decent but battery drains fast.', 'date' => '2025-08-30']
-        ]
-    ];
-}
+// SQLite persistence (reviews.sqlite)
+$dbFile = __DIR__ . '/reviews.sqlite';
+$pdo = null;
+$db_error = null;
+try {
+    $pdo = new PDO('sqlite:' . $dbFile);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-// Handle review submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
-    $product_id = intval($_POST['product_id']);
-    $name = trim(substr(htmlspecialchars($_POST['name'] ?? 'Anonymous'), 0, 60));
-    $title = trim(substr(htmlspecialchars($_POST['title'] ?? ''), 0, 80));
-    $comment = trim(substr(htmlspecialchars($_POST['comment'] ?? ''), 0, 1000));
-    $rating = max(1, min(5, intval($_POST['rating'] ?? 5)));
-    $date = date('Y-m-d');
+    // Create reviews table
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        rating INTEGER NOT NULL,
+        title TEXT,
+        comment TEXT,
+        date TEXT NOT NULL,
+        helpful INTEGER DEFAULT 0
+    )");
 
-    if (!isset($_SESSION['reviews'][$product_id])) {
-        $_SESSION['reviews'][$product_id] = [];
+    // Migrate demo reviews from session into SQLite once
+    if (isset($_SESSION['reviews']) && empty($_SESSION['migrated_to_sqlite'])) {
+        $insert = $pdo->prepare('INSERT INTO reviews (product_id,name,rating,title,comment,date) VALUES (:pid,:name,:rating,:title,:comment,:date)');
+        foreach ($_SESSION['reviews'] as $pid => $rlist) {
+            foreach ($rlist as $r) {
+                $insert->execute([
+                    ':pid' => $pid,
+                    ':name' => $r['name'] ?? 'Anonymous',
+                    ':rating' => $r['rating'] ?? 5,
+                    ':title' => $r['title'] ?? '',
+                    ':comment' => $r['comment'] ?? '',
+                    ':date' => $r['date'] ?? date('Y-m-d')
+                ]);
+            }
+        }
+        // mark migrated so we don't duplicate
+        $_SESSION['migrated_to_sqlite'] = true;
     }
 
-    $_SESSION['reviews'][$product_id][] = [
-        'name' => $name,
-        'rating' => $rating,
-        'title' => $title,
-        'comment' => $comment,
-        'date' => $date
-    ];
+    // Handle review submission (persist to SQLite)
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
+        $product_id = intval($_POST['product_id']);
+        $name = trim(substr(htmlspecialchars($_POST['name'] ?? 'Anonymous'), 0, 60));
+        $title = trim(substr(htmlspecialchars($_POST['title'] ?? ''), 0, 80));
+        $comment = trim(substr(htmlspecialchars($_POST['comment'] ?? ''), 0, 1000));
+        $rating = max(1, min(5, intval($_POST['rating'] ?? 5)));
+        $date = date('Y-m-d');
 
-    $success = "Thank you — your review has been added.";
+        $stmt = $pdo->prepare('INSERT INTO reviews (product_id,name,rating,title,comment,date) VALUES (:pid,:name,:rating,:title,:comment,:date)');
+        $stmt->execute([
+            ':pid' => $product_id,
+            ':name' => $name,
+            ':rating' => $rating,
+            ':title' => $title,
+            ':comment' => $comment,
+            ':date' => $date
+        ]);
+
+        // Redirect to avoid form resubmission
+        header('Location: ' . $_SERVER['REQUEST_URI']);
+        exit;
+    }
+
+    // Helper to fetch reviews by product
+    function get_reviews(PDO $pdo, int $product_id): array {
+        $s = $pdo->prepare('SELECT id,product_id,name,rating,title,comment,date,helpful FROM reviews WHERE product_id = :pid ORDER BY id DESC');
+        $s->execute([':pid' => $product_id]);
+        return $s->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    // Build reviews map for all products
+    $reviews_by_product = [];
+    foreach ($products as $p) {
+        $reviews_by_product[$p['id']] = get_reviews($pdo, $p['id']);
+    }
+
+    // aggregate overall stats
+    $all = [];
+    foreach ($reviews_by_product as $list) { $all = array_merge($all, $list); }
+
+} catch (Exception $e) {
+    // If SQLite not available, fallback to session-based demo
+    $db_error = $e->getMessage();
+    if (!isset($_SESSION['reviews'])) {
+        $_SESSION['reviews'] = [
+            1 => [
+                ['name' => 'Priya', 'rating' => 5, 'title' => 'Excellent sound', 'comment' => 'Great bass and battery life.', 'date' => '2025-11-18'],
+                ['name' => 'Aman', 'rating' => 4, 'title' => 'Very good', 'comment' => 'Comfortable but a bit tight.', 'date' => '2025-10-05']
+            ],
+            2 => [
+                ['name' => 'Rina', 'rating' => 5, 'title' => 'Lovely aroma', 'comment' => 'Lasts for many hours, highly recommended.', 'date' => '2025-09-12']
+            ],
+            3 => [],
+            4 => [
+                ['name' => 'Dev', 'rating' => 3, 'title' => 'Good features', 'comment' => 'Decent but battery drains fast.', 'date' => '2025-08-30']
+            ]
+        ];
+    }
+
+    // If form submitted and DB failed, store in session
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_review'])) {
+        $product_id = intval($_POST['product_id']);
+        $name = trim(substr(htmlspecialchars($_POST['name'] ?? 'Anonymous'), 0, 60));
+        $title = trim(substr(htmlspecialchars($_POST['title'] ?? ''), 0, 80));
+        $comment = trim(substr(htmlspecialchars($_POST['comment'] ?? ''), 0, 1000));
+        $rating = max(1, min(5, intval($_POST['rating'] ?? 5)));
+        $date = date('Y-m-d');
+
+        if (!isset($_SESSION['reviews'][$product_id])) $_SESSION['reviews'][$product_id] = [];
+        $_SESSION['reviews'][$product_id][] = ['name'=>$name,'rating'=>$rating,'title'=>$title,'comment'=>$comment,'date'=>$date];
+        header('Location: ' . $_SERVER['REQUEST_URI']);
+        exit;
+    }
+
+    // Build reviews map from session fallback
+    $reviews_by_product = $_SESSION['reviews'] ?? [];
+    $all = [];
+    foreach ($reviews_by_product as $list) { $all = array_merge($all, $list); }
+
 }
 
 // Helper: compute average rating
@@ -123,9 +203,17 @@ function rating_distribution($reviews) {
 <nav class="navbar navbar-expand">
     <div class="container">
         <a class="navbar-brand brand" href="#">ReviewBox</a>
-        <div class="ms-auto small-muted">Demo • Reviews stored in PHP session</div>
+        <div class="ms-auto small-muted"><?php echo $pdo ? 'Demo • Reviews stored in reviews.sqlite' : 'Demo • Reviews stored in PHP session'; ?></div>
     </div>
 </nav>
+
+<?php if (!empty($db_error)): ?>
+    <div class="container mt-3">
+        <div class="alert alert-warning" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>SQLite error: <?php echo htmlspecialchars($db_error); ?> — falling back to session storage.
+        </div>
+    </div>
+<?php endif; ?>
 
 <main class="container my-5">
     <?php if (isset($success)): ?>
@@ -157,7 +245,7 @@ function rating_distribution($reviews) {
             <div class="row g-4" id="productsGrid">
                 <?php foreach ($products as $p):
                     $rid = $p['id'];
-                    $reviews = $_SESSION['reviews'][$rid] ?? [];
+                    $reviews = $reviews_by_product[$rid] ?? [];
                     $avg = avg_rating($reviews);
                     $dist = rating_distribution($reviews);
                 ?>
@@ -251,12 +339,12 @@ function rating_distribution($reviews) {
 
                 <hr class="my-4">
                 <h6 class="mb-2">Quick stats</h6>
-                <div class="mb-3 small-muted">This is a static demo — reviews are stored in your session and will reset when the session ends.</div>
+                <div class="mb-3 small-muted"><?php echo $pdo ? 'Reviews are persisted in a local SQLite DB (reviews.sqlite).' : 'This is a static demo — reviews are stored in your session and will reset when the session ends.'; ?></div>
 
                 <div class="mt-2">
                     <?php
                     // aggregate overall stats for demo (all products combined)
-                    $all = array_reduce($_SESSION['reviews'], fn($carry, $item) => array_merge($carry, $item), []);
+                    // $all is prepared earlier from DB or session fallback
                     $overall_avg = avg_rating($all);
                     $overall_total = count($all);
                     ?>
@@ -330,13 +418,13 @@ function rating_distribution($reviews) {
         }
 
         // Build product modal
-        const products = <?php echo json_encode($products, JSON_HEX_TAG); ?>;
-        const reviews = <?php echo json_encode($_SESSION['reviews'], JSON_HEX_TAG); ?>;
+    const products = <?php echo json_encode($products, JSON_HEX_TAG); ?>;
+    const reviews = <?php echo json_encode($reviews_by_product, JSON_HEX_TAG); ?>;
 
         window.openProduct = function(id){
             const p = products.find(x=>x.id===id);
             const rlist = reviews[id] || [];
-            const avg = rlist.length ? (rlist.reduce((a,b)=>a+b.rating,0)/rlist.length).toFixed(1) : '-';
+            const avg = rlist.length ? (rlist.reduce((a,b)=>a+Number(b.rating),0)/rlist.length).toFixed(1) : '-';
 
             const html = `
                 <div class="row g-3">
