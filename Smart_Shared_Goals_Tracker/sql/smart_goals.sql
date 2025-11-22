@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(150) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
   avatar VARCHAR(255),
+  bio TEXT DEFAULT NULL,
+  cover_photo VARCHAR(255) DEFAULT NULL,
+  motivational_quote VARCHAR(255) DEFAULT NULL,
+  show_streaks_public TINYINT(1) DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -265,3 +269,10 @@ CREATE TABLE IF NOT EXISTS challenge_goals (
   FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
   UNIQUE KEY (challenge_id, goal_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migration snippet: if you already have a `users` table, run this to add the new profile fields
+-- ALTER TABLE `users`
+--   ADD COLUMN `bio` TEXT DEFAULT NULL,
+--   ADD COLUMN `cover_photo` VARCHAR(255) DEFAULT NULL,
+--   ADD COLUMN `motivational_quote` VARCHAR(255) DEFAULT NULL,
+--   ADD COLUMN `show_streaks_public` TINYINT(1) DEFAULT 0;

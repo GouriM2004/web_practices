@@ -26,6 +26,7 @@ if (!empty($_SESSION['user_id'])) {
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false"><?= htmlspecialchars($user['name']) ?></a>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
                             <li><a class="dropdown-item" href="settings.php">Settings</a></li>
                             <li><a class="dropdown-item" href="goals.php">My Goals</a></li>
                             <li>

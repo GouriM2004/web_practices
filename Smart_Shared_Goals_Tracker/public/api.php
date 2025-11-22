@@ -453,7 +453,7 @@ if ($method === 'GET' && preg_match('#^me$#', $path)) {
         jsonErr('Not authenticated', 401);
         exit;
     }
-    $stmt = $pdo->prepare('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, name, email, avatar, bio, cover_photo, motivational_quote, show_streaks_public, created_at FROM users WHERE id = ?');
     $stmt->execute([$_SESSION['user_id']]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$user) {
@@ -479,6 +479,35 @@ if ($method === 'GET' && preg_match('#^me$#', $path)) {
     exit;
 }
 
+// POST /api/me/profile -> update profile fields (bio, cover_photo, motivational_quote, show_streaks_public)
+if ($method === 'POST' && preg_match('#^me/profile$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $bio = isset($data['bio']) ? $data['bio'] : null;
+    $cover = isset($data['cover_photo']) ? $data['cover_photo'] : null;
+    $quote = isset($data['motivational_quote']) ? $data['motivational_quote'] : null;
+    $show = isset($data['show_streaks_public']) ? (int)(bool)$data['show_streaks_public'] : 0;
+    try {
+        // Note: some installations may not have `updated_at` column on `users`.
+        // Avoid relying on it here to prevent SQL errors. If you want an `updated_at`
+        // column, run the migration provided separately.
+        $stmt = $pdo->prepare('UPDATE users SET bio = ?, cover_photo = ?, motivational_quote = ?, show_streaks_public = ? WHERE id = ?');
+        $stmt->execute([$bio, $cover, $quote, $show, $_SESSION['user_id']]);
+        // return updated user (reuse /me logic)
+        $stmt2 = $pdo->prepare('SELECT id, name, email, avatar, bio, cover_photo, motivational_quote, show_streaks_public, created_at FROM users WHERE id = ?');
+        $stmt2->execute([$_SESSION['user_id']]);
+        $u = $stmt2->fetch(PDO::FETCH_ASSOC);
+        jsonOk(['user' => $u]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Failed to update profile: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // GET /api/users -> find user by email (query param: email)
 if ($method === 'GET' && preg_match('#^users$#', $path)) {
     if (empty($_SESSION['user_id'])) {
@@ -490,12 +519,18 @@ if ($method === 'GET' && preg_match('#^users$#', $path)) {
         jsonErr('Missing email', 422);
         exit;
     }
-    $stmt = $pdo->prepare('SELECT id, name, email FROM users WHERE email = ?');
+    $stmt = $pdo->prepare('SELECT id, name, email, bio, cover_photo, motivational_quote, show_streaks_public FROM users WHERE email = ?');
     $stmt->execute([$q]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$u) {
         jsonErr('User not found', 404);
         exit;
+    }
+    $viewerId = (int)$_SESSION['user_id'];
+    $ownerId = (int)$u['id'];
+    $canViewProfile = $viewerId === $ownerId || ((int)($u['show_streaks_public'] ?? 0) === 1);
+    if (!$canViewProfile) {
+        unset($u['bio'], $u['cover_photo'], $u['motivational_quote'], $u['show_streaks_public']);
     }
     jsonOk(['user' => $u]);
     exit;
