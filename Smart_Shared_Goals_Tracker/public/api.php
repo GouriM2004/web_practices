@@ -299,6 +299,392 @@ if ($method === 'POST' && preg_match('#^goals/(\d+)/checkins$#', $path, $m)) {
     }
 }
 
+// ----------------------------
+// RESTful Goals resource
+// - GET  /api/goals
+// - POST /api/goals
+// - GET  /api/goals/{id}
+// - PATCH/PUT /api/goals/{id}
+// - DELETE /api/goals/{id}
+// ----------------------------
+
+// GET /api/goals -> list goals visible to the user (own, group, public)
+if ($method === 'GET' && preg_match('#^goals$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    // user groups
+    $stmt = $pdo->prepare('SELECT group_id FROM group_members WHERE user_id = ?');
+    $stmt->execute([$uid]);
+    $grows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $placeholders = '';
+    $params = [];
+    if ($grows) {
+        $placeholders = implode(',', array_fill(0, count($grows), '?'));
+        $params = $grows;
+    }
+    // build query: own goals OR group goals in user's groups OR public goals
+    $sql = 'SELECT * FROM goals WHERE active = 1 AND (created_by = ? OR visibility = "public"';
+    $qparams = [$uid];
+    if ($placeholders) {
+        $sql .= ' OR group_id IN (' . $placeholders . ')';
+        $qparams = array_merge($qparams, $params);
+    }
+    $sql .= ') ORDER BY created_at DESC LIMIT 200';
+    $stmt2 = $pdo->prepare($sql);
+    $stmt2->execute($qparams);
+    $rows = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+    jsonOk(['goals' => $rows]);
+    exit;
+}
+
+// POST /api/goals -> create a goal
+if ($method === 'POST' && preg_match('#^goals$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    if (empty($data['title'])) {
+        jsonErr('Missing title', 422);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $title = $data['title'];
+    $desc = $data['description'] ?? null;
+    $groupId = isset($data['group_id']) ? (int)$data['group_id'] : null;
+    $cadence = in_array($data['cadence'] ?? 'daily', ['daily', 'weekly', 'monthly']) ? $data['cadence'] : 'daily';
+    $target = isset($data['target_value']) ? (int)$data['target_value'] : null;
+    $unit = $data['unit'] ?? null;
+    $start = $data['start_date'] ?? null;
+    $end = $data['end_date'] ?? null;
+    $visibility = in_array($data['visibility'] ?? 'private', ['public', 'private']) ? $data['visibility'] : 'private';
+    try {
+        if ($groupId) {
+            $stmt = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmt->execute([$groupId, $uid]);
+            if (!$stmt->fetchColumn()) {
+                jsonErr('Not a member of target group', 403);
+                exit;
+            }
+        }
+        $stmt = $pdo->prepare('INSERT INTO goals (title, description, created_by, group_id, cadence, target_value, unit, start_date, end_date, visibility) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$title, $desc, $uid, $groupId, $cadence, $target, $unit, $start, $end, $visibility]);
+        $gid = (int)$pdo->lastInsertId();
+        jsonOk(['goal_id' => $gid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error creating goal: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// GET /api/goals/{id} -> get goal details (respect visibility)
+if ($method === 'GET' && preg_match('#^goals/(\d+)$#', $path, $m)) {
+    $goalId = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM goals WHERE id = ? AND active = 1');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    // visibility check
+    $uid = $_SESSION['user_id'] ?? null;
+    if ($g['visibility'] === 'private') {
+        if (empty($uid) || ((int)$g['created_by'] !== (int)$uid)) {
+            // check group admin
+            if (empty($g['group_id']) || empty($uid)) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+            $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtRole->execute([$g['group_id'], $uid]);
+            $role = $stmtRole->fetchColumn();
+            if (!in_array($role, ['owner', 'admin'])) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+        }
+    }
+    jsonOk(['goal' => $g]);
+    exit;
+}
+
+// PATCH /api/goals/{id} -> update goal
+if (($method === 'PATCH' || $method === 'PUT') && preg_match('#^goals/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM goals WHERE id = ?');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = false;
+    if ((int)$g['created_by'] === $uid) $allowed = true;
+    if (!$allowed && $g['group_id']) {
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$g['group_id'], $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $fields = [];
+    $values = [];
+    $allowedFields = ['title', 'description', 'cadence', 'target_value', 'unit', 'start_date', 'end_date', 'visibility', 'active', 'group_id'];
+    foreach ($allowedFields as $f) {
+        if (array_key_exists($f, $data)) {
+            $fields[] = "$f = ?";
+            $values[] = $data[$f];
+        }
+    }
+    if (empty($fields)) {
+        jsonErr('No updatable fields provided', 422);
+        exit;
+    }
+    $values[] = $goalId;
+    $sql = 'UPDATE goals SET ' . implode(', ', $fields) . ' , updated_at = NOW() WHERE id = ?';
+    try {
+        $stmtUpd = $pdo->prepare($sql);
+        $stmtUpd->execute($values);
+        jsonOk(['goal_id' => $goalId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Update failed: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// DELETE /api/goals/{id}
+if ($method === 'DELETE' && preg_match('#^goals/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM goals WHERE id = ?');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = false;
+    if ((int)$g['created_by'] === $uid) $allowed = true;
+    if (!$allowed && $g['group_id']) {
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$g['group_id'], $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    try {
+        // soft-delete by marking active = 0
+        $stmtDel = $pdo->prepare('UPDATE goals SET active = 0, updated_at = NOW() WHERE id = ?');
+        $stmtDel->execute([$goalId]);
+        jsonOk(['deleted' => true]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Delete failed: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// ----------------------------
+// Checkins resource helpers
+// - GET  /api/goals/{id}/checkins  (list)
+// - GET  /api/checkins/{id}       (get)
+// - PATCH /api/checkins/{id}
+// - DELETE /api/checkins/{id}
+// ----------------------------
+
+// GET /api/goals/{id}/checkins -> list checkins for goal
+if ($method === 'GET' && preg_match('#^goals/(\d+)/checkins$#', $path, $m)) {
+    $goalId = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM goals WHERE id = ? AND active = 1');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    // permission: public or owner/group member/admin
+    $uid = $_SESSION['user_id'] ?? null;
+    if ($g['visibility'] === 'private') {
+        if (empty($uid) || ((int)$g['created_by'] !== (int)$uid)) {
+            if (empty($g['group_id']) || empty($uid)) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+            $stmtRole = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtRole->execute([$g['group_id'], $uid]);
+            if (!$stmtRole->fetchColumn()) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+        }
+    }
+    $userFilter = isset($_GET['user_id']) ? (int)$_GET['user_id'] : null;
+    if ($userFilter) {
+        $stmt = $pdo->prepare('SELECT * FROM checkins WHERE goal_id = ? AND user_id = ? ORDER BY date DESC');
+        $stmt->execute([$goalId, $userFilter]);
+    } else {
+        $stmt = $pdo->prepare('SELECT * FROM checkins WHERE goal_id = ? ORDER BY date DESC LIMIT 500');
+        $stmt->execute([$goalId]);
+    }
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    jsonOk(['checkins' => $rows]);
+    exit;
+}
+
+// GET /api/checkins/{id}
+if ($method === 'GET' && preg_match('#^checkins/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $cid = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM checkins WHERE id = ?');
+    $stmt->execute([$cid]);
+    $c = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$c) {
+        jsonErr('Checkin not found', 404);
+        exit;
+    }
+    // owner or group admin
+    $uid = (int)$_SESSION['user_id'];
+    if ((int)$c['user_id'] !== $uid) {
+        // check goal's group admin
+        $stmtG = $pdo->prepare('SELECT group_id FROM goals WHERE id = ?');
+        $stmtG->execute([$c['goal_id']]);
+        $gid = $stmtG->fetchColumn();
+        if (!$gid) {
+            jsonErr('Not allowed', 403);
+            exit;
+        }
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (!in_array($role, ['owner', 'admin'])) {
+            jsonErr('Not allowed', 403);
+            exit;
+        }
+    }
+    jsonOk(['checkin' => $c]);
+    exit;
+}
+
+// PATCH /api/checkins/{id}
+if (($method === 'PATCH' || $method === 'PUT') && preg_match('#^checkins/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $cid = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $stmt = $pdo->prepare('SELECT * FROM checkins WHERE id = ?');
+    $stmt->execute([$cid]);
+    $c = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$c) {
+        jsonErr('Checkin not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = ((int)$c['user_id'] === $uid);
+    if (!$allowed) {
+        $stmtG = $pdo->prepare('SELECT group_id FROM goals WHERE id = ?');
+        $stmtG->execute([$c['goal_id']]);
+        $gid = $stmtG->fetchColumn();
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    $fields = [];
+    $values = [];
+    foreach (['value', 'note', 'date'] as $f) {
+        if (array_key_exists($f, $data)) {
+            $fields[] = "$f = ?";
+            $values[] = $data[$f];
+        }
+    }
+    if (empty($fields)) {
+        jsonErr('No updatable fields', 422);
+        exit;
+    }
+    $values[] = $cid;
+    $sql = 'UPDATE checkins SET ' . implode(', ', $fields) . ' WHERE id = ?';
+    try {
+        $stmtUpd = $pdo->prepare($sql);
+        $stmtUpd->execute($values);
+        jsonOk(['checkin_id' => $cid]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Update failed: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// DELETE /api/checkins/{id}
+if ($method === 'DELETE' && preg_match('#^checkins/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $cid = (int)$m[1];
+    $stmt = $pdo->prepare('SELECT * FROM checkins WHERE id = ?');
+    $stmt->execute([$cid]);
+    $c = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$c) {
+        jsonErr('Checkin not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = ((int)$c['user_id'] === $uid);
+    if (!$allowed) {
+        $stmtG = $pdo->prepare('SELECT group_id FROM goals WHERE id = ?');
+        $stmtG->execute([$c['goal_id']]);
+        $gid = $stmtG->fetchColumn();
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$gid, $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    try {
+        $stmtDel = $pdo->prepare('DELETE FROM checkins WHERE id = ?');
+        $stmtDel->execute([$cid]);
+        jsonOk(['deleted' => true]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Delete failed: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // POST /api/sync -> accept outbox items from PWA (requires session)
 if ($method === 'POST' && preg_match('#^sync$#', $path)) {
     if (empty($_SESSION['user_id'])) {
