@@ -193,7 +193,13 @@ if ($method === 'POST' && preg_match('#^login$#', $path)) {
     $stmt = $pdo->prepare('SELECT id, password FROM users WHERE email = ?');
     $stmt->execute([$data['email']]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$user || !password_verify($data['password'], $user['password'])) {
+
+    $ok = false;
+    if ($user && !empty($user['password'])) {
+        $ok = password_verify($data['password'], $user['password']);
+    }
+
+    if (!$ok) {
         jsonErr('Invalid credentials', 401);
         exit;
     }
@@ -865,6 +871,36 @@ if ($method === 'GET' && preg_match('#^me$#', $path)) {
     exit;
 }
 
+// GET /api/me/insights -> recent habit insights for current user
+if ($method === 'GET' && preg_match('#^me/insights$#', $path)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $goalId = isset($_GET['goal_id']) ? (int)$_GET['goal_id'] : null;
+    try {
+        if ($goalId) {
+            $stmt = $pdo->prepare('SELECT id, goal_id, insight_type, payload, generated_at FROM user_habit_insights WHERE user_id = ? AND goal_id = ? ORDER BY generated_at DESC LIMIT 200');
+            $stmt->execute([$uid, $goalId]);
+        } else {
+            $stmt = $pdo->prepare('SELECT id, goal_id, insight_type, payload, generated_at FROM user_habit_insights WHERE user_id = ? ORDER BY generated_at DESC LIMIT 200');
+            $stmt->execute([$uid]);
+        }
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // decode payload JSON for convenience
+        foreach ($rows as &$r) {
+            $r['payload'] = json_decode($r['payload'], true);
+        }
+        unset($r);
+        jsonOk(['insights' => $rows]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error fetching insights: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // POST /api/me/profile -> update profile fields (bio, cover_photo, motivational_quote, show_streaks_public)
 if ($method === 'POST' && preg_match('#^me/profile$#', $path)) {
     if (empty($_SESSION['user_id'])) {
@@ -976,6 +1012,7 @@ if ($method === 'GET' && preg_match('#^groups/(\d+)/leaderboard$#', $path, $m)) 
         exit;
     }
     $groupId = (int)$m[1];
+    $uid = (int)($_SESSION['user_id'] ?? 0);
     $period = $_GET['period'] ?? 'weekly';
     $metric = $_GET['metric'] ?? 'checkins';
 
@@ -1920,53 +1957,3 @@ if ($method === 'GET' && preg_match('#^activity$#', $path)) {
 
 http_response_code(404);
 echo json_encode(['error' => 'Not found']);
-
-// DELETE /api/goals/{id} -> delete a goal (creator or group owner/admin)
-if ($method === 'DELETE' && preg_match('#^goals/(\d+)$#', $path, $m)) {
-    if (empty($_SESSION['user_id'])) {
-        jsonErr('Not authenticated', 401);
-        exit;
-    }
-    $goalId = (int)$m[1];
-    try {
-        $stmt = $pdo->prepare('SELECT id, created_by, group_id FROM goals WHERE id = ?');
-        $stmt->execute([$goalId]);
-        $g = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$g) {
-            jsonErr('Goal not found', 404);
-            exit;
-        }
-        $uid = $_SESSION['user_id'];
-        $allowed = false;
-        if ((int)$g['created_by'] === (int)$uid) {
-            $allowed = true;
-        } elseif (!empty($g['group_id'])) {
-            // check group role
-            $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
-            $stmtRole->execute([$g['group_id'], $uid]);
-            $myRole = $stmtRole->fetchColumn();
-            if (in_array($myRole, ['owner', 'admin'])) $allowed = true;
-        }
-        if (!$allowed) {
-            jsonErr('Forbidden', 403);
-            exit;
-        }
-
-        // delete goal (cascade will remove related checkins/meta)
-        $stmtDel = $pdo->prepare('DELETE FROM goals WHERE id = ?');
-        $stmtDel->execute([$goalId]);
-
-        // activity log
-        try {
-            $stmtAct = $pdo->prepare('INSERT INTO activity_log (user_id, group_id, goal_id, action, meta) VALUES (?, ?, ?, ?, ?)');
-            $stmtAct->execute([$uid, $g['group_id'] ?: null, $goalId, 'goal_deleted', json_encode([])]);
-        } catch (Exception $e) {
-        }
-
-        jsonOk(['deleted' => (int)$goalId]);
-        exit;
-    } catch (Exception $e) {
-        jsonErr('Error deleting goal: ' . $e->getMessage(), 500);
-        exit;
-    }
-}

@@ -270,6 +270,37 @@ CREATE TABLE IF NOT EXISTS challenge_goals (
   UNIQUE KEY (challenge_id, goal_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ==============================
+-- USER HABIT INSIGHTS
+-- Stores computed insights for users and their goals
+-- ==============================
+CREATE TABLE IF NOT EXISTS user_habit_insights (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  goal_id INT DEFAULT NULL,
+  insight_type VARCHAR(100) NOT NULL,
+  payload JSON NOT NULL,
+  generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE SET NULL,
+  INDEX idx_user (user_id),
+  INDEX idx_goal (goal_id),
+  INDEX idx_type (insight_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migration snippet (run if not present):
+-- ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+-- CREATE TABLE IF NOT EXISTS user_habit_insights (
+--   id INT AUTO_INCREMENT PRIMARY KEY,
+--   user_id INT NOT NULL,
+--   goal_id INT DEFAULT NULL,
+--   insight_type VARCHAR(100) NOT NULL,
+--   payload JSON NOT NULL,
+--   generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+--   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+--   FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE SET NULL
+-- );
+
 -- Migration snippet: if you already have a `users` table, run this to add the new profile fields
 -- ALTER TABLE `users`
 --   ADD COLUMN `bio` TEXT DEFAULT NULL,
