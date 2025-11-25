@@ -104,6 +104,32 @@ $heatDates = array_map(function ($d) {
                     <!-- Team progress & leaderboard (populated by JS) -->
                 </div>
                 <hr>
+                <div id="dependenciesSection" class="mt-3">
+                    <h6>Dependencies</h6>
+                    <div id="depsList">
+                        <div class="small text-muted">Loading dependencies…</div>
+                    </div>
+                    <div class="mt-2">
+                        <form id="addDependencyForm" class="row gx-2">
+                            <div class="col-6">
+                                <select id="depTargetSelect" class="form-select form-select-sm">
+                                    <option value="">Select a goal...</option>
+                                </select>
+                            </div>
+                            <div class="col-4">
+                                <select id="depTypeSelect" class="form-select form-select-sm">
+                                    <option value="requires">Requires (must do first)</option>
+                                    <option value="triggers">Triggers (auto-create)</option>
+                                </select>
+                            </div>
+                            <div class="col-2">
+                                <button id="addDepBtn" class="btn btn-sm btn-primary w-100" type="submit">Add</button>
+                            </div>
+                        </form>
+                        <div class="form-text small text-muted mt-1">Dependencies help chain goals; only goal owners or group admins can manage them.</div>
+                    </div>
+                </div>
+                <hr>
                 <h6>Discussion</h6>
                 <div id="goalChat" class="card" data-goal-id="<?= $id ?>">
                     <div class="card-body">
@@ -368,5 +394,182 @@ $heatDates = array_map(function ($d) {
                 else alert('Network error');
             }
         });
+    })();
+
+    // Dependencies management (list / add / delete)
+    (function() {
+        const subjectId = <?= $id ?>;
+        const depsList = document.getElementById('depsList');
+        const depTargetSelect = document.getElementById('depTargetSelect');
+        const depTypeSelect = document.getElementById('depTypeSelect');
+        const addDependencyForm = document.getElementById('addDependencyForm');
+        const addDepBtn = document.getElementById('addDepBtn');
+
+        async function loadGoalOptions() {
+            try {
+                const r = await fetch('api.php/goals', {
+                    credentials: 'include'
+                });
+                if (!r.ok) {
+                    console.warn('Failed loading goals for dependency select', r.status);
+                    depTargetSelect.innerHTML = '<option value="">Failed to load goals</option>';
+                    depTargetSelect.disabled = true;
+                    if (addDepBtn) addDepBtn.disabled = true;
+                    return;
+                }
+                const j = await r.json();
+                const goals = j.goals || [];
+                depTargetSelect.innerHTML = '<option value="">Select a goal...</option>';
+                let count = 0;
+                goals.forEach(g => {
+                    if (g.id === subjectId) return;
+                    const opt = document.createElement('option');
+                    opt.value = g.id;
+                    opt.textContent = g.title + (g.visibility === 'public' ? ' (public)' : '');
+                    depTargetSelect.appendChild(opt);
+                    count++;
+                });
+                if (count === 0) {
+                    depTargetSelect.innerHTML = '<option value="">No other goals available</option>';
+                    depTargetSelect.disabled = true;
+                    if (addDepBtn) addDepBtn.disabled = true;
+                } else {
+                    depTargetSelect.disabled = false;
+                    if (addDepBtn) addDepBtn.disabled = false;
+                }
+            } catch (e) {
+                console.warn('Could not load goals for dependency select', e);
+                depTargetSelect.innerHTML = '<option value="">Failed to load goals</option>';
+                depTargetSelect.disabled = true;
+                if (addDepBtn) addDepBtn.disabled = true;
+            }
+        }
+
+        async function loadDependencies() {
+            depsList.innerHTML = '<div class="small text-muted">Loading dependencies…</div>';
+            try {
+                const r = await fetch('api.php/goals/' + subjectId + '/dependencies', {
+                    credentials: 'include'
+                });
+                if (!r.ok) {
+                    depsList.innerHTML = '<div class="text-danger small">Failed to load</div>';
+                    return;
+                }
+                const j = await r.json();
+                const outgoing = j.outgoing || [];
+                const incoming = j.incoming || [];
+                const wrap = document.createElement('div');
+
+                if (outgoing.length) {
+                    const h = document.createElement('div');
+                    h.className = 'small fw-bold';
+                    h.textContent = 'Outgoing (this goal depends on)';
+                    wrap.appendChild(h);
+                    const list = document.createElement('div');
+                    list.className = 'list-group mb-2';
+                    outgoing.forEach(d => {
+                        const it = document.createElement('div');
+                        it.className = 'list-group-item d-flex justify-content-between align-items-center p-2';
+                        it.innerHTML = '<div><strong>' + escapeHtml(d.object_title) + '</strong><div class="small text-muted">' + escapeHtml(d.relation_type) + '</div></div>';
+                        const del = document.createElement('button');
+                        del.className = 'btn btn-sm btn-outline-danger';
+                        del.textContent = 'Delete';
+                        del.addEventListener('click', async () => {
+                            if (!confirm('Delete this dependency?')) return;
+                            try {
+                                const rr = await fetch('api.php/goals/' + subjectId + '/dependencies/' + d.id, {
+                                    method: 'DELETE',
+                                    credentials: 'include'
+                                });
+                                const pj = await rr.json();
+                                if (!rr.ok) {
+                                    UI.toast(pj.error || 'Failed to delete');
+                                    return;
+                                }
+                                UI.toast('Dependency removed');
+                                await loadDependencies();
+                            } catch (e) {
+                                console.error(e);
+                                UI.toast('Network error');
+                            }
+                        });
+                        it.appendChild(del);
+                        list.appendChild(it);
+                    });
+                    wrap.appendChild(list);
+                } else {
+                    const no = document.createElement('div');
+                    no.className = 'small text-muted mb-2';
+                    no.textContent = 'No outgoing dependencies';
+                    wrap.appendChild(no);
+                }
+
+                if (incoming.length) {
+                    const h2 = document.createElement('div');
+                    h2.className = 'small fw-bold';
+                    h2.textContent = 'Incoming (other goals depend on this)';
+                    wrap.appendChild(h2);
+                    const list2 = document.createElement('div');
+                    list2.className = 'list-group';
+                    incoming.forEach(d => {
+                        const it = document.createElement('div');
+                        it.className = 'list-group-item p-2';
+                        it.innerHTML = '<div><strong>' + escapeHtml(d.subject_title) + '</strong><div class="small text-muted">' + escapeHtml(d.relation_type) + '</div></div>';
+                        list2.appendChild(it);
+                    });
+                    wrap.appendChild(list2);
+                }
+
+                depsList.innerHTML = '';
+                depsList.appendChild(wrap);
+            } catch (e) {
+                console.error(e);
+                depsList.innerHTML = '<div class="text-danger small">Error loading dependencies</div>';
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        addDependencyForm.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const target = Number(depTargetSelect.value || 0);
+            const rel = depTypeSelect.value || 'requires';
+            if (!target) {
+                UI.toast('Select a target goal');
+                return;
+            }
+            try {
+                const r = await fetch('api.php/goals/' + subjectId + '/dependencies', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        object_goal_id: target,
+                        relation_type: rel
+                    })
+                });
+                const j = await r.json();
+                if (!r.ok) {
+                    UI.toast(j.error || 'Failed to add dependency');
+                    return;
+                }
+                UI.toast('Dependency added');
+                depTargetSelect.value = '';
+                depTypeSelect.value = 'requires';
+                await loadDependencies();
+            } catch (e) {
+                console.error(e);
+                UI.toast('Network error');
+            }
+        });
+
+        // init
+        loadGoalOptions();
+        loadDependencies();
     })();
 </script>

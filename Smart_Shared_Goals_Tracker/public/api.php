@@ -254,12 +254,52 @@ if ($method === 'POST' && preg_match('#^goals/(\d+)/checkins$#', $path, $m)) {
             exit;
         }
 
+        // dependency checks: ensure any 'requires' dependencies are satisfied before inserting
+        $stmtDeps = $pdo->prepare('SELECT d.id, d.object_goal_id, d.relation_type, g.title AS object_title FROM goal_dependencies d JOIN goals g ON g.id = d.object_goal_id WHERE d.subject_goal_id = ? AND d.relation_type = ?');
+        $stmtDeps->execute([$goalId, 'requires']);
+        $requires = $stmtDeps->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($requires as $req) {
+            // check for a checkin for the required goal on the same date created before now
+            $stmtReq = $pdo->prepare('SELECT id, created_at FROM checkins WHERE goal_id = ? AND user_id = ? AND date = ? ORDER BY created_at DESC LIMIT 1');
+            $stmtReq->execute([$req['object_goal_id'], $_SESSION['user_id'], $date]);
+            $r = $stmtReq->fetch(PDO::FETCH_ASSOC);
+            if (!$r) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                jsonErr('Dependency not satisfied: please complete "' . ($req['object_title'] ?? 'required goal') . '" before this goal', 409);
+                exit;
+            }
+            // ensure it was created before now (sanity)
+            if (strtotime($r['created_at']) > time()) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                jsonErr('Dependency check failed: required goal check-in is in the future', 409);
+                exit;
+            }
+        }
+
         // insert
         $stmtInsert = $pdo->prepare('INSERT INTO checkins (goal_id, user_id, value, note, date) VALUES (?, ?, ?, ?, ?)');
         $stmtInsert->execute([$goalId, $_SESSION['user_id'], $value, $note, $date]);
         $cid = (int)$pdo->lastInsertId();
         $stmtInsertKey = $pdo->prepare('INSERT INTO idempotency_keys (client_key, checkin_id) VALUES (?, ?)');
         $stmtInsertKey->execute([$clientKey, $cid]);
+
+        // triggers: if this goal triggers other goals, create a lightweight checkin for the target goal (if missing)
+        $stmtTrig = $pdo->prepare('SELECT d.id, d.object_goal_id, g.title AS object_title FROM goal_dependencies d JOIN goals g ON g.id = d.object_goal_id WHERE d.subject_goal_id = ? AND d.relation_type = ?');
+        $stmtTrig->execute([$goalId, 'triggers']);
+        $triggers = $stmtTrig->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($triggers as $t) {
+            // skip if already exists for same date
+            $stmtCheckTrig = $pdo->prepare('SELECT id FROM checkins WHERE goal_id = ? AND user_id = ? AND date = ?');
+            $stmtCheckTrig->execute([$t['object_goal_id'], $_SESSION['user_id'], $date]);
+            if ($stmtCheckTrig->fetchColumn()) continue;
+            try {
+                $stmtInsTrig = $pdo->prepare('INSERT INTO checkins (goal_id, user_id, value, note, date) VALUES (?, ?, ?, ?, ?)');
+                $noteTrig = 'Auto-triggered by goal ' . $goalId;
+                $stmtInsTrig->execute([$t['object_goal_id'], $_SESSION['user_id'], null, $noteTrig, $date]);
+            } catch (Exception $e) {
+                // ignore trigger insert errors
+            }
+        }
 
         // post-processing: streaks & badges
         $streakSvc = new \Services\StreakService($pdo);
@@ -513,6 +553,140 @@ if ($method === 'DELETE' && preg_match('#^goals/(\d+)$#', $path, $m)) {
 }
 
 // ----------------------------
+// ----------------------------
+// Goal dependencies endpoints
+// - GET  /api/goals/{id}/dependencies  (list incoming + outgoing)
+// - POST /api/goals/{id}/dependencies  (create dependency)
+// - DELETE /api/goals/{id}/dependencies/{dep_id}
+// ----------------------------
+
+// GET /api/goals/{id}/dependencies -> list dependencies for a goal
+if ($method === 'GET' && preg_match('#^goals/(\d+)/dependencies$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    try {
+        $stmtOut = $pdo->prepare('SELECT d.id, d.object_goal_id, d.relation_type, g.title AS object_title FROM goal_dependencies d JOIN goals g ON g.id = d.object_goal_id WHERE d.subject_goal_id = ?');
+        $stmtOut->execute([$goalId]);
+        $out = $stmtOut->fetchAll(PDO::FETCH_ASSOC);
+        $stmtIn = $pdo->prepare('SELECT d.id, d.subject_goal_id, d.relation_type, g.title AS subject_title FROM goal_dependencies d JOIN goals g ON g.id = d.subject_goal_id WHERE d.object_goal_id = ?');
+        $stmtIn->execute([$goalId]);
+        $in = $stmtIn->fetchAll(PDO::FETCH_ASSOC);
+        jsonOk(['outgoing' => $out, 'incoming' => $in]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error fetching dependencies: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// POST /api/goals/{id}/dependencies -> add dependency (subject = {id})
+if ($method === 'POST' && preg_match('#^goals/(\d+)/dependencies$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $subjectId = (int)$m[1];
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+    $objectId = isset($data['object_goal_id']) ? (int)$data['object_goal_id'] : null;
+    $rel = $data['relation_type'] ?? 'requires';
+    if (!$objectId || !in_array($rel, ['requires', 'triggers'])) {
+        jsonErr('Missing or invalid fields', 422);
+        exit;
+    }
+    if ($objectId === $subjectId) {
+        jsonErr('A goal cannot depend on itself', 422);
+        exit;
+    }
+    // permission: only goal owner or group admin
+    $stmt = $pdo->prepare('SELECT * FROM goals WHERE id = ?');
+    $stmt->execute([$subjectId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = ((int)$g['created_by'] === $uid);
+    if (!$allowed && $g['group_id']) {
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$g['group_id'], $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    // ensure object exists
+    $stmtObj = $pdo->prepare('SELECT id FROM goals WHERE id = ?');
+    $stmtObj->execute([$objectId]);
+    if (!$stmtObj->fetchColumn()) {
+        jsonErr('Target goal not found', 404);
+        exit;
+    }
+    try {
+        $stmtIns = $pdo->prepare('INSERT INTO goal_dependencies (subject_goal_id, object_goal_id, relation_type) VALUES (?, ?, ?)');
+        $stmtIns->execute([$subjectId, $objectId, $rel]);
+        $depId = (int)$pdo->lastInsertId();
+        jsonOk(['dependency_id' => $depId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error creating dependency: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// DELETE /api/goals/{id}/dependencies/{dep_id}
+if ($method === 'DELETE' && preg_match('#^goals/(\d+)/dependencies/(\d+)$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $subjectId = (int)$m[1];
+    $depId = (int)$m[2];
+    // load dependency
+    $stmt = $pdo->prepare('SELECT * FROM goal_dependencies WHERE id = ? AND subject_goal_id = ?');
+    $stmt->execute([$depId, $subjectId]);
+    $d = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$d) {
+        jsonErr('Dependency not found', 404);
+        exit;
+    }
+    // permission: same as creating
+    $stmtG = $pdo->prepare('SELECT * FROM goals WHERE id = ?');
+    $stmtG->execute([$subjectId]);
+    $g = $stmtG->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    $uid = (int)$_SESSION['user_id'];
+    $allowed = ((int)$g['created_by'] === $uid);
+    if (!$allowed && $g['group_id']) {
+        $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+        $stmtRole->execute([$g['group_id'], $uid]);
+        $role = $stmtRole->fetchColumn();
+        if (in_array($role, ['owner', 'admin'])) $allowed = true;
+    }
+    if (!$allowed) {
+        jsonErr('Not allowed', 403);
+        exit;
+    }
+    try {
+        $stmtDel = $pdo->prepare('DELETE FROM goal_dependencies WHERE id = ?');
+        $stmtDel->execute([$depId]);
+        jsonOk(['deleted' => $depId]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error deleting dependency: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
+// ----------------------------
 // Checkins resource helpers
 // - GET  /api/goals/{id}/checkins  (list)
 // - GET  /api/checkins/{id}       (get)
@@ -750,6 +924,28 @@ if ($method === 'POST' && preg_match('#^sync$#', $path)) {
                 continue;
             }
 
+            // dependency checks for 'requires'
+            $stmtDeps = $pdo->prepare('SELECT d.id, d.object_goal_id, d.relation_type, g.title AS object_title FROM goal_dependencies d JOIN goals g ON g.id = d.object_goal_id WHERE d.subject_goal_id = ? AND d.relation_type = ?');
+            $stmtDeps->execute([$goalId, 'requires']);
+            $requires = $stmtDeps->fetchAll(PDO::FETCH_ASSOC);
+            $depFailed = false;
+            foreach ($requires as $req) {
+                $stmtReq = $pdo->prepare('SELECT id, created_at FROM checkins WHERE goal_id = ? AND user_id = ? AND date = ? ORDER BY created_at DESC LIMIT 1');
+                $stmtReq->execute([$req['object_goal_id'], $_SESSION['user_id'], $date]);
+                $r = $stmtReq->fetch(PDO::FETCH_ASSOC);
+                if (!$r) {
+                    $conflicts[] = ['client_idempotency_key' => $clientKey, 'error' => 'dependency_unsatisfied', 'missing_goal_id' => (int)$req['object_goal_id'], 'missing_goal_title' => $req['object_title'] ?? null];
+                    $depFailed = true;
+                    break;
+                }
+                if (strtotime($r['created_at']) > time()) {
+                    $conflicts[] = ['client_idempotency_key' => $clientKey, 'error' => 'dependency_time_conflict', 'missing_goal_id' => (int)$req['object_goal_id']];
+                    $depFailed = true;
+                    break;
+                }
+            }
+            if ($depFailed) continue;
+
             // insert
             $stmtInsertCheckin->execute([$goalId, $_SESSION['user_id'], $value, $note, $date]);
             $cid = (int)$pdo->lastInsertId();
@@ -787,6 +983,26 @@ if ($method === 'POST' && preg_match('#^sync$#', $path)) {
             }
 
             $accepted[] = ['client_idempotency_key' => $clientKey, 'checkin_id' => $cid, 'awarded_badges' => $badges, 'updated_streak' => $streak, 'awarded_xp' => $xpAward ?? 0, 'new_level' => $newLevel ?? null];
+
+            // triggers: if this inserted goal triggers other goals, create lightweight checkins for them (if missing)
+            try {
+                $stmtTrig = $pdo->prepare('SELECT d.id, d.object_goal_id FROM goal_dependencies d WHERE d.subject_goal_id = ? AND d.relation_type = ?');
+                $stmtTrig->execute([$goalId, 'triggers']);
+                $trs = $stmtTrig->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($trs as $t) {
+                    $stmtCheckTrig = $pdo->prepare('SELECT id FROM checkins WHERE goal_id = ? AND user_id = ? AND date = ?');
+                    $stmtCheckTrig->execute([$t['object_goal_id'], $_SESSION['user_id'], $date]);
+                    if ($stmtCheckTrig->fetchColumn()) continue;
+                    try {
+                        $stmtInsertCheckin->execute([$t['object_goal_id'], $_SESSION['user_id'], null, 'Auto-triggered by goal ' . $goalId, $date]);
+                        // don't map idempotency keys for auto triggers
+                    } catch (Exception $e) {
+                        // ignore trigger insert errors
+                    }
+                }
+            } catch (Exception $e) {
+                // ignore trigger errors
+            }
         }
 
         $pdo->commit();

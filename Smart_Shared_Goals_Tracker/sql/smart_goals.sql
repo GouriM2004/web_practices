@@ -271,6 +271,25 @@ CREATE TABLE IF NOT EXISTS challenge_goals (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ==============================
+-- GOAL DEPENDENCIES
+-- Define goal chains and triggers between goals
+-- subject_goal_id depends on or triggers object_goal_id
+-- relation_type: 'requires' (object must be completed before subject) or 'triggers' (subject causes object action)
+-- ==============================
+CREATE TABLE IF NOT EXISTS goal_dependencies (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  subject_goal_id INT NOT NULL,
+  object_goal_id INT NOT NULL,
+  relation_type ENUM('requires','triggers') NOT NULL DEFAULT 'requires',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (subject_goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  FOREIGN KEY (object_goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  UNIQUE KEY (subject_goal_id, object_goal_id, relation_type),
+  INDEX idx_subject (subject_goal_id),
+  INDEX idx_object (object_goal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
 -- USER HABIT INSIGHTS
 -- Stores computed insights for users and their goals
 -- ==============================
