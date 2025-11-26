@@ -79,7 +79,12 @@ CREATE TABLE IF NOT EXISTS goals (
   description TEXT,
   created_by INT DEFAULT NULL,
   group_id INT DEFAULT NULL,
-  cadence ENUM('daily','weekly','monthly') DEFAULT 'daily',
+  cadence ENUM('daily','weekly','monthly','quarterly','seasonal') DEFAULT 'daily',
+  -- reset rules
+  reset_day_of_week TINYINT NULL DEFAULT 1, -- 0=Sunday..6=Saturday (weekly reset day, default Monday=1)
+  reset_day_of_month TINYINT NULL DEFAULT 1, -- day of month to reset (1-28/31)
+  season_start_month TINYINT NULL DEFAULT NULL, -- 1-12
+  season_end_month TINYINT NULL DEFAULT NULL,   -- 1-12
   target_value INT DEFAULT NULL,
   unit VARCHAR(50) DEFAULT NULL,
   start_date DATE DEFAULT NULL,
@@ -178,7 +183,7 @@ CREATE TABLE IF NOT EXISTS goal_templates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(200) NOT NULL,
   description TEXT,
-  cadence ENUM('daily','weekly','monthly') DEFAULT 'daily',
+  cadence ENUM('daily','weekly','monthly','quarterly','seasonal') DEFAULT 'daily',
   unit VARCHAR(50) DEFAULT NULL,
   start_offset_days INT DEFAULT 0, -- days from today when goal should start when cloned
   duration_days INT DEFAULT NULL,  -- optional duration in days to compute end_date when cloning
@@ -305,6 +310,26 @@ CREATE TABLE IF NOT EXISTS user_habit_insights (
   INDEX idx_user (user_id),
   INDEX idx_goal (goal_id),
   INDEX idx_type (insight_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
+-- GOAL PERIODS / COUNTERS
+-- Stores per-goal, per-user aggregated totals for calendar periods
+-- This lets the system record period snapshots and present "reset" counts
+-- ==============================
+CREATE TABLE IF NOT EXISTS goal_periods (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  goal_id INT NOT NULL,
+  user_id INT NOT NULL,
+  period_type ENUM('weekly','monthly','quarterly','seasonal') NOT NULL,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  total_value INT DEFAULT 0,
+  checkins_count INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY (goal_id, user_id, period_start),
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Migration snippet (run if not present):

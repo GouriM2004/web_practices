@@ -2053,6 +2053,71 @@ if ($method === 'GET' && preg_match('#^templates$#', $path)) {
     exit;
 }
 
+// GET /api/goals/{id}/periods -> recent period aggregates for a goal (current user by default)
+if ($method === 'GET' && preg_match('#^goals/(\d+)/periods$#', $path, $m)) {
+    if (empty($_SESSION['user_id'])) {
+        jsonErr('Not authenticated', 401);
+        exit;
+    }
+    $goalId = (int)$m[1];
+    $viewer = (int)$_SESSION['user_id'];
+    $targetUser = isset($_GET['user_id']) ? (int)$_GET['user_id'] : $viewer;
+
+    // fetch goal and check visibility / permissions
+    $stmt = $pdo->prepare('SELECT id, created_by, group_id, visibility FROM goals WHERE id = ? AND active = 1');
+    $stmt->execute([$goalId]);
+    $g = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$g) {
+        jsonErr('Goal not found', 404);
+        exit;
+    }
+    // visibility check for viewer
+    if ($g['visibility'] === 'private') {
+        if ($viewer !== (int)$g['created_by']) {
+            if (empty($g['group_id'])) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+            $stmtRole = $pdo->prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtRole->execute([$g['group_id'], $viewer]);
+            if (!$stmtRole->fetchColumn()) {
+                jsonErr('Not allowed', 403);
+                exit;
+            }
+        }
+    }
+
+    // if requesting another user's periods, require goal owner or group admin
+    if ($targetUser !== $viewer) {
+        $allowed = false;
+        if ($viewer === (int)$g['created_by']) $allowed = true;
+        if (!$allowed && $g['group_id']) {
+            $stmtRole = $pdo->prepare('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?');
+            $stmtRole->execute([$g['group_id'], $viewer]);
+            $role = $stmtRole->fetchColumn();
+            if (in_array($role, ['owner', 'admin'])) $allowed = true;
+        }
+        if (!$allowed) {
+            jsonErr('Not allowed to view other users\' periods', 403);
+            exit;
+        }
+    }
+
+    // fetch recent periods for the target user
+    try {
+        $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 12;
+        if ($limit <= 0 || $limit > 52) $limit = 12;
+        $stmtP = $pdo->prepare('SELECT id, period_type, period_start, period_end, total_value, checkins_count, created_at FROM goal_periods WHERE goal_id = ? AND user_id = ? ORDER BY period_start DESC LIMIT ?');
+        $stmtP->execute([$goalId, $targetUser, $limit]);
+        $rows = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+        jsonOk(['goal_id' => $goalId, 'user_id' => $targetUser, 'periods' => $rows]);
+        exit;
+    } catch (Exception $e) {
+        jsonErr('Error fetching periods: ' . $e->getMessage(), 500);
+        exit;
+    }
+}
+
 // GET /api/templates/{id} -> get template details
 if ($method === 'GET' && preg_match('#^templates/(\d+)$#', $path, $m)) {
     $tid = (int)$m[1];
