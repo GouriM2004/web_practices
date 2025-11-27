@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS groups_tbl (
   code VARCHAR(20) UNIQUE,
   privacy ENUM('public','private') DEFAULT 'private',
   created_by INT DEFAULT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    difficulty ENUM('easy','medium','hard') DEFAULT 'medium',
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -328,6 +328,23 @@ CREATE TABLE IF NOT EXISTS goal_periods (
   checkins_count INT DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY (goal_id, user_id, period_start),
+  FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ==============================
+-- PER-USER GOAL DIFFICULTY / MULTIPLIER
+-- Stores per-user adjustments to goal difficulty and multiplier used by UI
+-- ==============================
+CREATE TABLE IF NOT EXISTS goal_user_difficulty (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  goal_id INT NOT NULL,
+  user_id INT NOT NULL,
+  difficulty ENUM('easy','medium','hard') NOT NULL DEFAULT 'medium',
+  multiplier DECIMAL(5,3) NOT NULL DEFAULT 1.000,
+  last_adjusted DATETIME DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(255) DEFAULT NULL,
+  UNIQUE KEY ux_goal_user (goal_id, user_id),
   FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

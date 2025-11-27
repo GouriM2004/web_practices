@@ -455,6 +455,30 @@ if ($method === 'GET' && preg_match('#^goals/(\d+)$#', $path, $m)) {
             }
         }
     }
+    // attach per-user difficulty/multiplier if viewer is authenticated
+    $viewer = $_SESSION['user_id'] ?? null;
+    if ($viewer) {
+        try {
+            $stmtD = $pdo->prepare('SELECT difficulty, multiplier, last_adjusted, note FROM goal_user_difficulty WHERE goal_id = ? AND user_id = ?');
+            $stmtD->execute([$goalId, $viewer]);
+            $ud = $stmtD->fetch(PDO::FETCH_ASSOC);
+            if ($ud) {
+                $g['user_difficulty'] = [
+                    'difficulty' => $ud['difficulty'],
+                    'multiplier' => (float)$ud['multiplier'],
+                    'last_adjusted' => $ud['last_adjusted'],
+                    'note' => $ud['note']
+                ];
+            } else {
+                // expose default goal difficulty
+                $g['user_difficulty'] = ['difficulty' => $g['difficulty'] ?? 'medium', 'multiplier' => 1.0, 'last_adjusted' => null, 'note' => null];
+            }
+        } catch (Exception $e) {
+            // ignore difficulty fetch errors
+            $g['user_difficulty'] = ['difficulty' => $g['difficulty'] ?? 'medium', 'multiplier' => 1.0, 'last_adjusted' => null, 'note' => null];
+        }
+    }
+
     jsonOk(['goal' => $g]);
     exit;
 }

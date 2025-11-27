@@ -23,6 +23,31 @@ if (!$goal) {
     include __DIR__ . '/includes/footer.php';
     exit;
 }
+
+// fetch per-user difficulty/multiplier if present
+$userDifficulty = ['difficulty' => $goal['difficulty'] ?? 'medium', 'multiplier' => 1.0, 'last_adjusted' => null, 'note' => null];
+try {
+    $stmtUD = $pdo->prepare('SELECT difficulty, multiplier, last_adjusted, note FROM goal_user_difficulty WHERE goal_id = ? AND user_id = ?');
+    $stmtUD->execute([$id, $userId]);
+    $ud = $stmtUD->fetch(PDO::FETCH_ASSOC);
+    if ($ud) {
+        $userDifficulty['difficulty'] = $ud['difficulty'];
+        $userDifficulty['multiplier'] = (float)$ud['multiplier'];
+        $userDifficulty['last_adjusted'] = $ud['last_adjusted'];
+        $userDifficulty['note'] = $ud['note'];
+    }
+} catch (Exception $e) {
+    // ignore and use defaults
+}
+
+// compute adjusted target (if numeric target exists)
+$adjustedTarget = null;
+if (!empty($goal['target_value'])) {
+    $mult = $userDifficulty['multiplier'] ?? 1.0;
+    // if target is integer, round to int; otherwise keep one decimal
+    $adjusted = $goal['target_value'] * $mult;
+    $adjustedTarget = (floor($adjusted) == $adjusted) ? (int)$adjusted : round($adjusted, 2);
+}
 // determine whether current user can change visibility (owner or group admin)
 $canEditVisibility = false;
 $goalVisibility = $goal['visibility'] ?? 'private';
@@ -87,6 +112,20 @@ $heatDates = array_map(function ($d) {
                     <div>Current streak: <strong id="currentStreak">—</strong></div>
                     <div>Longest streak: <strong id="longestStreak">—</strong></div>
                 </div>
+                <?php if (!empty($goal['target_value'])): ?>
+                    <div class="mt-2">
+                        <strong>Target:</strong>
+                        <div class="small text-muted"><?= htmlspecialchars($goal['target_value']) ?> <?= $goal['unit'] ? htmlspecialchars($goal['unit']) : '' ?></div>
+                        <?php if ($adjustedTarget !== null && $adjustedTarget != $goal['target_value']): ?>
+                            <div class="mt-1"><strong>Adjusted target:</strong> <span id="adjustedTarget"><?= htmlspecialchars($adjustedTarget) ?></span> <?= $goal['unit'] ? htmlspecialchars($goal['unit']) : '' ?> <span class="badge bg-info text-dark ms-2"><?= htmlspecialchars(ucfirst($userDifficulty['difficulty'])) ?></span></div>
+                            <?php if (!empty($userDifficulty['last_adjusted'])): ?>
+                                <div class="form-text small text-muted">Last adjusted: <?= htmlspecialchars($userDifficulty['last_adjusted']) ?> — <?= htmlspecialchars($userDifficulty['note'] ?? '') ?></div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="mt-1"><span class="badge <?= ($userDifficulty['difficulty'] === 'hard' ? 'bg-danger' : ($userDifficulty['difficulty'] === 'easy' ? 'bg-success text-dark' : 'bg-secondary')) ?>">Difficulty: <?= htmlspecialchars(ucfirst($userDifficulty['difficulty'])) ?></span></div>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
                 <hr>
                 <div class="mb-2">
                     Visibility: <span id="goalVisibilityBadge" class="badge <?= $goalVisibility === 'public' ? 'bg-success' : 'bg-secondary' ?>"><?= htmlspecialchars(ucfirst($goalVisibility)) ?></span>
