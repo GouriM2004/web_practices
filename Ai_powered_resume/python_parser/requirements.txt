@@ -1,0 +1,6 @@
+Flask==2.3.2
+python-dotenv==1.0.0
+gunicorn==20.1.0
+# Optionally: spacy, en_core_web_sm
+# spacy==3.6.0
+# en-core-web-sm (install via: python -m spacy download en_core_web_sm)
