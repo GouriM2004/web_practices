@@ -1,0 +1,13 @@
+/* Small UI tweaks for Resume Tailor */
+body {
+  background: #f8f9fa;
+}
+main.container {
+  max-width: 980px;
+}
+.navbar-brand {
+  font-weight: 600;
+}
+.card pre {
+  background: #f7f7fb;
+}

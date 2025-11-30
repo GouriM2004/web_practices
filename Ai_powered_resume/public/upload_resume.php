@@ -1,23 +1,21 @@
 <?php
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/Controllers/ResumeController.php';
+include __DIR__ . '/includes/header.php';
 
-// very simple form
+// handle upload
+$message = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     session_start();
-    // Ensure a valid user_id exists to satisfy the foreign key constraint.
-    // If user is not logged in, try to reuse an existing user; otherwise create a default user.
+    // ensure a user id exists (scaffold behavior)
     $user_id = $_SESSION['user_id'] ?? null;
     if (!$user_id) {
         $db = get_db();
-        // try to find any existing user
-        $stmt = $db->query('SELECT id FROM users ORDER BY id LIMIT 1');
-        $row = $stmt->fetch();
+        $row = $db->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetch();
         if ($row && isset($row['id'])) {
             $user_id = $row['id'];
             $_SESSION['user_id'] = $user_id;
         } else {
-            // create a default placeholder user (password left empty for scaffold)
             $stmt = $db->prepare('INSERT INTO users (name,email,password) VALUES (?,?,?)');
             $stmt->execute(['Default User', 'default@example.com', '']);
             $user_id = $db->lastInsertId();
@@ -27,28 +25,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         $id = ResumeController::upload($user_id, $_FILES['resume']);
-        echo "Uploaded. Resume ID: " . $id;
+        $message = ['type' => 'success', 'text' => "Uploaded. Resume ID: " . $id];
     } catch (Exception $e) {
-        echo "Error: " . $e->getMessage();
+        $message = ['type' => 'danger', 'text' => 'Error: ' . $e->getMessage()];
     }
-    exit;
 }
 ?>
 
-<!doctype html>
-<html>
+<div class="card">
+    <div class="card-body">
+        <h3 class="card-title">Upload Resume</h3>
+        <p class="text-muted">Accepts PDF, DOCX, or plain text files.</p>
 
-<head>
-    <meta charset="utf-8">
-    <title>Upload Resume</title>
-</head>
+        <?php if ($message): ?>
+            <div class="alert alert-<?php echo $message['type']; ?>"><?php echo htmlspecialchars($message['text']); ?></div>
+        <?php endif; ?>
 
-<body>
-    <h2>Upload Resume (PDF/DOCX/TXT)</h2>
-    <form method="post" enctype="multipart/form-data">
-        <input type="file" name="resume" required />
-        <button type="submit">Upload</button>
-    </form>
-</body>
+        <form method="post" enctype="multipart/form-data">
+            <div class="mb-3">
+                <input class="form-control" type="file" name="resume" required />
+            </div>
+            <button class="btn btn-primary">Upload</button>
+        </form>
+    </div>
+</div>
 
-</html>
+<?php include __DIR__ . '/includes/footer.php'; ?>
