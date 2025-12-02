@@ -27,8 +27,17 @@
                     <li class="nav-item"><a class="nav-link" href="tailor.php">Tailor</a></li>
                 </ul>
                 <div class="d-flex">
-                    <a href="login.php" class="btn btn-outline-light btn-sm me-2">Login</a>
-                    <a href="register.php" class="btn btn-light btn-sm">Register</a>
+                    <?php
+                    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+                    $userName = $_SESSION['user_name'] ?? null;
+                    if ($userName):
+                    ?>
+                        <span class="navbar-text text-light me-2">Hello, <?php echo htmlspecialchars($userName); ?></span>
+                        <a href="logout.php" class="btn btn-outline-light btn-sm">Logout</a>
+                    <?php else: ?>
+                        <a href="login.php" class="btn btn-outline-light btn-sm me-2">Login</a>
+                        <a href="register.php" class="btn btn-light btn-sm">Register</a>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
