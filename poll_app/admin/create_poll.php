@@ -10,33 +10,35 @@ $question = '';
 $cleanOptions = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $question = trim($_POST['question'] ?? '');
-    $options = $_POST['options'] ?? [];
+  $question = trim($_POST['question'] ?? '');
+  $options = $_POST['options'] ?? [];
+  $allow_multiple = isset($_POST['allow_multiple']) ? 1 : 0;
 
-    $cleanOptions = [];
-    foreach ($options as $opt) {
-        $opt = trim($opt);
-        if ($opt !== '') $cleanOptions[] = $opt;
-    }
+  $cleanOptions = [];
+  foreach ($options as $opt) {
+    $opt = trim($opt);
+    if ($opt !== '') $cleanOptions[] = $opt;
+  }
 
-    if ($question === '' || count($cleanOptions) < 2) {
-        $error = "Question is required and at least 2 options.";
+  if ($question === '' || count($cleanOptions) < 2) {
+    $error = "Question is required and at least 2 options.";
+  } else {
+    $poll_id = $pollModel->createPoll($question, $cleanOptions, $allow_multiple);
+    if ($poll_id) {
+      $success = "Poll created successfully.";
+      $question = '';
+      $cleanOptions = [];
     } else {
-        $poll_id = $pollModel->createPoll($question, $cleanOptions);
-        if ($poll_id) {
-            $success = "Poll created successfully.";
-            $question = '';
-            $cleanOptions = [];
-        } else {
-            $error = "Failed to create poll.";
-        }
+      $error = "Failed to create poll.";
     }
+  }
 }
 
 $existingOptions = $cleanOptions ?: ['', '', ''];
 ?>
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <title>Create Poll - Admin</title>
@@ -56,67 +58,78 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
     }
   </script>
 </head>
+
 <body class="bg-light">
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-  <div class="container">
-    <a class="navbar-brand" href="dashboard.php">Poll Admin</a>
-    <div class="d-flex">
-      <a href="dashboard.php" class="btn btn-outline-light btn-sm me-2">Dashboard</a>
-      <a href="logout.php" class="btn btn-outline-light btn-sm">Logout</a>
-    </div>
-  </div>
-</nav>
-
-<div class="container py-4">
-  <div class="row justify-content-center">
-    <div class="col-md-8">
-
-      <div class="card shadow-sm">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center">
-          <h4 class="mb-0">Create New Poll</h4>
-          <a href="dashboard.php" class="btn btn-sm btn-outline-secondary">&laquo; Back</a>
-        </div>
-        <div class="card-body">
-          <?php if($error): ?>
-            <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
-          <?php endif; ?>
-          <?php if($success): ?>
-            <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
-          <?php endif; ?>
-
-          <form method="post">
-            <div class="mb-3">
-              <label class="form-label">Question</label>
-              <input type="text" name="question" class="form-control"
-                     value="<?= htmlspecialchars($question) ?>" required>
-            </div>
-
-            <div class="mb-2 d-flex justify-content-between align-items-center">
-              <label class="form-label mb-0">Options</label>
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="addOptionField()">+ Add Option</button>
-            </div>
-
-            <div id="options-container">
-              <?php foreach ($existingOptions as $optVal): ?>
-                <div class="input-group mb-2">
-                  <input type="text" name="options[]" class="form-control" placeholder="Option text"
-                         value="<?= htmlspecialchars($optVal) ?>">
-                  <button class="btn btn-outline-danger" type="button"
-                          onclick="this.closest('.input-group').remove()">Remove</button>
-                </div>
-              <?php endforeach; ?>
-            </div>
-
-            <button type="submit" class="btn btn-success mt-3">Create Poll</button>
-          </form>
-        </div>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+      <a class="navbar-brand" href="dashboard.php">Poll Admin</a>
+      <div class="d-flex">
+        <a href="dashboard.php" class="btn btn-outline-light btn-sm me-2">Dashboard</a>
+        <a href="logout.php" class="btn btn-outline-light btn-sm">Logout</a>
       </div>
+    </div>
+  </nav>
 
+  <div class="container py-4">
+    <div class="row justify-content-center">
+      <div class="col-md-8">
+
+        <div class="card shadow-sm">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Create New Poll</h4>
+            <a href="dashboard.php" class="btn btn-sm btn-outline-secondary">&laquo; Back</a>
+          </div>
+          <div class="card-body">
+            <?php if ($error): ?>
+              <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
+            <?php if ($success): ?>
+              <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
+            <?php endif; ?>
+
+            <form method="post">
+              <div class="mb-3">
+                <label class="form-label">Question</label>
+                <input type="text" name="question" class="form-control"
+                  value="<?= htmlspecialchars($question) ?>" required>
+              </div>
+
+              <div class="mb-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="allow_multiple" id="allowMultiple" value="1">
+                  <label class="form-check-label" for="allowMultiple">
+                    Allow multiple choice (users can select more than one option)
+                  </label>
+                </div>
+              </div>
+
+              <div class="mb-2 d-flex justify-content-between align-items-center">
+                <label class="form-label mb-0">Options</label>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addOptionField()">+ Add Option</button>
+              </div>
+
+              <div id="options-container">
+                <?php foreach ($existingOptions as $optVal): ?>
+                  <div class="input-group mb-2">
+                    <input type="text" name="options[]" class="form-control" placeholder="Option text"
+                      value="<?= htmlspecialchars($optVal) ?>">
+                    <button class="btn btn-outline-danger" type="button"
+                      onclick="this.closest('.input-group').remove()">Remove</button>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+
+              <button type="submit" class="btn btn-success mt-3">Create Poll</button>
+            </form>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
+
 </html>
