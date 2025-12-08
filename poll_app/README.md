@@ -4,9 +4,10 @@ A feature-rich polling application with single and multiple choice support.
 
 ## Features
 
-- **Single Choice Polls**: Traditional polls where users select one option
-- **Multiple Choice Polls**: Users can select multiple options in a single poll
-- **IP-based Vote Tracking**: Prevents duplicate voting
+- **Single Choice & Multiple Choice Polls**: Radio or checkbox style voting
+- **Voter Authentication**: Login required before voting (creates account on first login)
+- **IP/Device Locking + Account Locking**: Duplicate votes blocked by voter account and IP per poll
+- **Anonymous vs Public Voting**: Voters choose to display their name in results or stay anonymous
 - **Admin Dashboard**: Manage polls, view results, toggle active status
 - **Real-time Results**: Live vote counts with percentage bars
 
@@ -16,8 +17,8 @@ A feature-rich polling application with single and multiple choice support.
 
    - Open phpMyAdmin
    - Create a database named `poll_app`
-   - Import `sql/poll_app.sql`
-   - If upgrading from an older version, also run `sql/add_multiple_choice.sql`
+     - Import `sql/poll_app.sql`
+     - If upgrading from an older version, also run `sql/add_multiple_choice.sql` and `sql/add_voter_auth.sql`
 
 2. Configure database credentials:
 

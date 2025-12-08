@@ -27,15 +27,29 @@ CREATE TABLE IF NOT EXISTS poll_options (
   FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Poll votes (to prevent duplicate voting per IP)
+-- Voters
+CREATE TABLE IF NOT EXISTS voters (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Poll votes (prevent duplicates by account or IP, capture anonymity preference)
 CREATE TABLE IF NOT EXISTS poll_votes (
   id INT AUTO_INCREMENT PRIMARY KEY,
   poll_id INT NOT NULL,
   option_id INT NOT NULL,
   voter_ip VARCHAR(50),
+  voter_id INT NULL,
+  voter_name VARCHAR(100),
+  is_public TINYINT(1) DEFAULT 0,
   voted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_poll_voter (poll_id, voter_id),
+  UNIQUE KEY uniq_poll_ip (poll_id, voter_ip),
   FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
-  FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE
+  FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE,
+  FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Insert a default admin (username: admin, password: admin123)

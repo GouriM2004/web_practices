@@ -2,10 +2,22 @@
 session_start();
 require_once __DIR__ . '/includes/bootstrap.php';
 
+// Require authenticated voter
+if (!VoterAuth::check()) {
+  $pollId = isset($_POST['poll_id']) ? (int)$_POST['poll_id'] : 0;
+  $target = 'voter_login.php?redirect=vote.php';
+  if ($pollId) $target .= '&poll_id=' . $pollId;
+  header('Location: ' . $target);
+  exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $poll_id   = (int)($_POST['poll_id'] ?? 0);
   $option_ids = $_POST['option_id'] ?? [];
   $ip        = $_SERVER['REMOTE_ADDR'] ?? '';
+  $is_public = isset($_POST['is_public']) && $_POST['is_public'] == '1' ? 1 : 0;
+  $voterId   = VoterAuth::id();
+  $voterName = VoterAuth::name();
 
   $pollModel = new Poll();
 
@@ -20,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 
   if ($poll_id && !empty($option_ids)) {
-    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip);
+    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public);
     if ($ok) {
       header("Location: results.php?poll_id=" . $poll_id);
       exit;

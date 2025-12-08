@@ -38,20 +38,34 @@ class Poll
         return $res;
     }
 
-    public function recordVote($poll_id, $option_ids, $ip)
+    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0)
     {
-        // check duplicate by IP
-        $stmt = $this->db->prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND voter_ip = ?");
+        // block duplicate votes by voter account or IP
+        $dupByUser = false;
+        if ($voterId !== null) {
+            $stmt = $this->db->prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND voter_id = ? LIMIT 1");
+            $stmt->bind_param("ii", $poll_id, $voterId);
+            $stmt->execute();
+            $dupByUser = $stmt->get_result()->num_rows > 0;
+            $stmt->close();
+        }
+
+        $stmt = $this->db->prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND voter_ip = ? LIMIT 1");
         $stmt->bind_param("is", $poll_id, $ip);
         $stmt->execute();
-        $dup = $stmt->get_result()->num_rows > 0;
+        $dupByIp = $stmt->get_result()->num_rows > 0;
         $stmt->close();
-        if ($dup) return false;
+
+        if ($dupByUser || $dupByIp) return false;
 
         // normalize to array
         if (!is_array($option_ids)) {
             $option_ids = [$option_ids];
         }
+
+        $voterIdParam = $voterId ?? null;
+        $voterNameParam = $voterName ?? null;
+        $isPublicFlag = $isPublic ? 1 : 0;
 
         // process each selected option
         foreach ($option_ids as $option_id) {
@@ -65,8 +79,8 @@ class Poll
             $stmt->close();
 
             // insert vote record
-            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip) VALUES (?, ?, ?)");
-            $stmt->bind_param("iis", $poll_id, $option_id, $ip);
+            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("iisisi", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag);
             $stmt->execute();
             $stmt->close();
         }
@@ -133,5 +147,16 @@ class Poll
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         return $row ? (int)$row['c'] : 0;
+    }
+
+    // List distinct public voters for a poll (for transparency display)
+    public function getPublicVoters($poll_id)
+    {
+        $stmt = $this->db->prepare("SELECT DISTINCT voter_name FROM poll_votes WHERE poll_id = ? AND is_public = 1 AND voter_name IS NOT NULL ORDER BY voter_name ASC");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $res ?: [];
     }
 }
