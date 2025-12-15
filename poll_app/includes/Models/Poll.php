@@ -38,7 +38,7 @@ class Poll
         return $res;
     }
 
-    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0)
+    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null)
     {
         // block duplicate votes by voter account or IP
         $dupByUser = false;
@@ -66,6 +66,7 @@ class Poll
         $voterIdParam = $voterId ?? null;
         $voterNameParam = $voterName ?? null;
         $isPublicFlag = $isPublic ? 1 : 0;
+        $locationParam = $location ?? null;
 
         // process each selected option
         foreach ($option_ids as $option_id) {
@@ -79,8 +80,8 @@ class Poll
             $stmt->close();
 
             // insert vote record
-            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("iisisi", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag);
+            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, location) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("iisisis", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $locationParam);
             $stmt->execute();
             $stmt->close();
         }
@@ -153,6 +154,27 @@ class Poll
     public function getPublicVoters($poll_id)
     {
         $stmt = $this->db->prepare("SELECT DISTINCT voter_name FROM poll_votes WHERE poll_id = ? AND is_public = 1 AND voter_name IS NOT NULL ORDER BY voter_name ASC");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $res ?: [];
+    }
+
+    // Get geographical voting breakdown for a poll
+    public function getGeographicalBreakdown($poll_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT 
+                pv.location,
+                po.option_text,
+                COUNT(*) as vote_count
+            FROM poll_votes pv
+            JOIN poll_options po ON pv.option_id = po.id
+            WHERE pv.poll_id = ? AND pv.location IS NOT NULL AND pv.location != ''
+            GROUP BY pv.location, po.option_text
+            ORDER BY pv.location, vote_count DESC
+        ");
         $stmt->bind_param("i", $poll_id);
         $stmt->execute();
         $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);

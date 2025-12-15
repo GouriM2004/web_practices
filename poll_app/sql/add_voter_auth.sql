@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS voters (
 ALTER TABLE poll_votes
   ADD COLUMN voter_id INT NULL AFTER voter_ip,
   ADD COLUMN voter_name VARCHAR(100) AFTER voter_id,
-  ADD COLUMN is_public TINYINT(1) DEFAULT 0 AFTER voter_name;
+  ADD COLUMN is_public TINYINT(1) DEFAULT 0 AFTER voter_name,
+  ADD COLUMN location VARCHAR(100) NULL AFTER is_public;
 
 -- Add duplicate-prevention indexes
 ALTER TABLE poll_votes

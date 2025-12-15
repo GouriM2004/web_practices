@@ -22,16 +22,23 @@ CREATE TABLE IF NOT EXISTS voters (
 
 -- Add identity columns and uniqueness constraints if missing
 ALTER TABLE poll_votes
-    ADD COLUMN IF NOT EXISTS voter_id INT NULL AFTER voter_ip,
-    ADD COLUMN IF NOT EXISTS voter_name VARCHAR(100) AFTER voter_id,
-    ADD COLUMN IF NOT EXISTS is_public TINYINT(1) DEFAULT 0 AFTER voter_name;
+  ADD COLUMN IF NOT EXISTS voter_id INT NULL AFTER voter_ip,
+  ADD COLUMN IF NOT EXISTS voter_name VARCHAR(100) AFTER voter_id,
+  ADD COLUMN IF NOT EXISTS is_public TINYINT(1) DEFAULT 0 AFTER voter_name,
+  ADD COLUMN IF NOT EXISTS location VARCHAR(100) NULL AFTER is_public;
 
-ALTER TABLE poll_votes
-    ADD CONSTRAINT IF NOT EXISTS uniq_poll_voter UNIQUE (poll_id, voter_id),
-    ADD CONSTRAINT IF NOT EXISTS uniq_poll_ip UNIQUE (poll_id, voter_ip);
+-- Add unique constraints (run only if constraints don't already exist - skip errors if they do)
+-- If you get "Duplicate key name" errors, the constraints already exist and you can skip these
 
-ALTER TABLE poll_votes
-    ADD CONSTRAINT IF NOT EXISTS fk_poll_votes_voter FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE SET NULL;
+-- ALTER TABLE poll_votes
+--   ADD CONSTRAINT uniq_poll_voter UNIQUE (poll_id, voter_id);
+
+-- ALTER TABLE poll_votes
+--   ADD CONSTRAINT uniq_poll_ip UNIQUE (poll_id, voter_ip);
+
+-- Add foreign key constraint (run only if constraint doesn't already exist)
+-- ALTER TABLE poll_votes
+--   ADD CONSTRAINT fk_poll_votes_voter FOREIGN KEY (voter_id) REFERENCES voters(id) ON DELETE SET NULL;
 
 -- Verify
 DESCRIBE polls;

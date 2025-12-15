@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $is_public = isset($_POST['is_public']) && $_POST['is_public'] == '1' ? 1 : 0;
   $voterId   = VoterAuth::id();
   $voterName = VoterAuth::name();
+  $location  = trim($_POST['location'] ?? '');
 
   $pollModel = new Poll();
 
@@ -32,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 
   if ($poll_id && !empty($option_ids)) {
-    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public);
+    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location);
     if ($ok) {
       header("Location: results.php?poll_id=" . $poll_id);
       exit;

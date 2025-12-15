@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS poll_votes (
   voter_id INT NULL,
   voter_name VARCHAR(100),
   is_public TINYINT(1) DEFAULT 0,
+  location VARCHAR(100) NULL,
   voted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_poll_voter (poll_id, voter_id),
   UNIQUE KEY uniq_poll_ip (poll_id, voter_ip),

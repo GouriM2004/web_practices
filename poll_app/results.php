@@ -64,6 +64,7 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             <?php endif; ?>
 
             <a href="index.php" class="btn btn-outline-secondary mt-3">Back to Poll</a>
+            <a href="live_dashboard.php?poll_id=<?= $poll_id ?>" class="btn btn-outline-info mt-3 ms-2">Live Dashboard</a>
 
             <?php if (!empty($publicVoters)): ?>
               <div class="mt-4">

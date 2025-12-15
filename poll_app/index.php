@@ -85,9 +85,19 @@ $voterName = $voterLogged ? VoterAuth::name() : null;
                   </label>
                 </div>
 
+                <div class="mb-3 mt-3">
+                  <label for="location" class="form-label">Location (Optional)</label>
+                  <input type="text" class="form-control" id="location" name="location"
+                    placeholder="e.g., California, New York, Texas" <?= $voterLogged ? '' : 'disabled' ?>>
+                  <small class="form-text text-muted">Help us show geographical voting patterns</small>
+                </div>
+
                 <button type="submit" class="btn btn-primary mt-3" <?= $voterLogged ? '' : 'disabled' ?>>Submit Vote</button>
                 <a href="results.php?poll_id=<?= $poll['id'] ?>" class="btn btn-outline-secondary mt-3 ms-2">
                   View Results
+                </a>
+                <a href="live_dashboard.php?poll_id=<?= $poll['id'] ?>" class="btn btn-outline-info mt-3 ms-2">
+                  Live Dashboard
                 </a>
               </form>
               <?php if ($poll['allow_multiple']): ?>
