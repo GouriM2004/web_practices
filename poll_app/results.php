@@ -66,6 +66,21 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             <a href="index.php" class="btn btn-outline-secondary mt-3">Back to Poll</a>
             <a href="live_dashboard.php?poll_id=<?= $poll_id ?>" class="btn btn-outline-info mt-3 ms-2">Live Dashboard</a>
 
+            <div class="card mt-3">
+              <div class="card-body">
+                <h6 class="mb-2">Share this poll</h6>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="copyLinkBtn">Copy Link</button>
+                  <a class="btn btn-success btn-sm" id="waShareBtn" target="_blank" rel="noopener">Share on WhatsApp</a>
+                  <button type="button" class="btn btn-outline-dark btn-sm" id="showQrBtn">Show QR</button>
+                </div>
+                <div id="qrWrap" class="mt-2" style="display:none;">
+                  <img id="qrImg" src="" alt="QR Code" class="img-fluid" style="max-width:220px;">
+                </div>
+                <small class="text-muted d-block mt-2" id="shareLinkText"></small>
+              </div>
+            </div>
+
             <?php if (!empty($publicVoters)): ?>
               <div class="mt-4">
                 <h6>Voters who chose to display their names:</h6>
@@ -84,6 +99,43 @@ foreach ($options as $o) $totalVotes += $o['votes'];
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    (function() {
+      const pollId = <?= $poll_id ?>;
+      const shareUrl = new URL(window.location.href);
+      shareUrl.searchParams.set('poll_id', pollId);
+      const link = shareUrl.toString();
+
+      const shareLinkText = document.getElementById('shareLinkText');
+      const copyBtn = document.getElementById('copyLinkBtn');
+      const waBtn = document.getElementById('waShareBtn');
+      const qrBtn = document.getElementById('showQrBtn');
+      const qrWrap = document.getElementById('qrWrap');
+      const qrImg = document.getElementById('qrImg');
+
+      if (shareLinkText) shareLinkText.textContent = link;
+      if (waBtn) waBtn.href = 'https://wa.me/?text=' + encodeURIComponent('Check this poll: ' + link);
+
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(link);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => copyBtn.textContent = 'Copy Link', 2000);
+          } catch (err) {
+            alert('Could not copy link: ' + err);
+          }
+        });
+      }
+
+      if (qrBtn && qrImg) {
+        qrBtn.addEventListener('click', () => {
+          qrWrap.style.display = 'block';
+          qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(link);
+        });
+      }
+    })();
+  </script>
 </body>
 
 </html>
