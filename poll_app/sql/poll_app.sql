@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS polls (
   question VARCHAR(255) NOT NULL,
   is_active TINYINT(1) DEFAULT 1,
   allow_multiple TINYINT(1) DEFAULT 0,
+  category VARCHAR(100) DEFAULT 'General',
+  location_tag VARCHAR(100) NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

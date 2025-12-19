@@ -7,10 +7,14 @@ $pollModel = new Poll();
 $error = '';
 $success = '';
 $question = '';
+$category = '';
+$locationTag = '';
 $cleanOptions = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $question = trim($_POST['question'] ?? '');
+  $category = trim($_POST['category'] ?? '');
+  $locationTag = trim($_POST['location_tag'] ?? '');
   $options = $_POST['options'] ?? [];
   $allow_multiple = isset($_POST['allow_multiple']) ? 1 : 0;
 
@@ -23,10 +27,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if ($question === '' || count($cleanOptions) < 2) {
     $error = "Question is required and at least 2 options.";
   } else {
-    $poll_id = $pollModel->createPoll($question, $cleanOptions, $allow_multiple);
+    $useCategory = $category !== '' ? $category : 'General';
+    $useLocation = $locationTag !== '' ? $locationTag : null;
+    $poll_id = $pollModel->createPoll($question, $cleanOptions, $allow_multiple, $useCategory, $useLocation);
     if ($poll_id) {
       $success = "Poll created successfully.";
       $question = '';
+      $category = '';
+      $locationTag = '';
       $cleanOptions = [];
     } else {
       $error = "Failed to create poll.";
@@ -92,7 +100,20 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
               <div class="mb-3">
                 <label class="form-label">Question</label>
                 <input type="text" name="question" class="form-control"
-                  value="<?= htmlspecialchars($question) ?>" required>
+                       value="<?= htmlspecialchars($question) ?>" required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label">Category (for recommendations)</label>
+                <input type="text" name="category" class="form-control" placeholder="e.g., Sports, Tech, Music"
+                       value="<?= htmlspecialchars($category) ?>">
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label">Location Tag (optional)</label>
+                <input type="text" name="location_tag" class="form-control" placeholder="e.g., California, UK, Remote"
+                       value="<?= htmlspecialchars($locationTag) ?>">
+                <small class="text-muted">Helps surface polls to voters from matching regions.</small>
               </div>
 
               <div class="mb-3">

@@ -6,6 +6,9 @@ $requestedPollId = (int)($_GET['poll_id'] ?? 0);
 $poll = $requestedPollId ? $pollModel->getPollById($requestedPollId) : $pollModel->getActivePoll();
 $voterLogged = VoterAuth::check();
 $voterName = $voterLogged ? VoterAuth::name() : null;
+$voterId = $voterLogged ? VoterAuth::id() : null;
+$lastLocation = $voterId ? $pollModel->getLastVoterLocation($voterId) : null;
+$recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
 ?>
 <!doctype html>
 <html lang="en">
@@ -136,6 +139,30 @@ $voterName = $voterLogged ? VoterAuth::name() : null;
             Admin? <a href="admin/login.php">Go to Admin Panel</a>
           </small>
         </div>
+
+        <?php if (!empty($recommendations)): ?>
+        <div class="card shadow-sm mt-4">
+          <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Recommended for you</h5>
+            <small class="text-muted">Based on your past votes and location</small>
+          </div>
+          <div class="card-body">
+            <?php foreach ($recommendations as $rec): ?>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                  <strong><?= htmlspecialchars($rec['question']) ?></strong><br>
+                  <small class="text-muted">Category: <?= htmlspecialchars($rec['category'] ?? 'General') ?><?= !empty($rec['location_tag']) ? ' · ' . htmlspecialchars($rec['location_tag']) : '' ?></small>
+                </div>
+                <div class="btn-group btn-group-sm">
+                  <a href="index.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-primary">Open</a>
+                  <a href="results.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-secondary">Results</a>
+                  <a href="live_dashboard.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-info">Live</a>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+        <?php endif; ?>
       </div>
     </div>
   </div>

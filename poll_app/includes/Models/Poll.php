@@ -18,6 +18,16 @@ class Poll
         return $res && $res->num_rows ? $res->fetch_assoc() : null;
     }
 
+    public function getActivePolls($limit = 10)
+    {
+        $stmt = $this->db->prepare("SELECT * FROM polls WHERE is_active = 1 ORDER BY created_at DESC LIMIT ?");
+        $stmt->bind_param("i", $limit);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $res ?: [];
+    }
+
     public function getPollById($id)
     {
         $stmt = $this->db->prepare("SELECT * FROM polls WHERE id = ?");
@@ -120,10 +130,10 @@ class Poll
         $stmt->close();
     }
 
-    public function createPoll($question, array $options, $allow_multiple = 0)
+    public function createPoll($question, array $options, $allow_multiple = 0, $category = 'General', $location_tag = null)
     {
-        $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple) VALUES (?, 1, ?)");
-        $stmt->bind_param("si", $question, $allow_multiple);
+        $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, category, location_tag) VALUES (?, 1, ?, ?, ?)");
+        $stmt->bind_param("siss", $question, $allow_multiple, $category, $location_tag);
         if (!$stmt->execute()) {
             $stmt->close();
             return false;
@@ -159,6 +169,99 @@ class Poll
         $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
         return $res ?: [];
+    }
+
+    // Get last known location for a voter
+    public function getLastVoterLocation($voterId)
+    {
+        $stmt = $this->db->prepare("SELECT location FROM poll_votes WHERE voter_id = ? AND location IS NOT NULL AND location != '' ORDER BY voted_at DESC LIMIT 1");
+        $stmt->bind_param("i", $voterId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row['location'] ?? null;
+    }
+
+    // Recommend polls based on past votes, categories, and location
+    public function getRecommendedPolls($voterId = null, $location = null, $limit = 5)
+    {
+        // If no voter, just return recent active polls
+        if ($voterId === null) {
+            return $this->getActivePolls($limit);
+        }
+
+        // Preferred categories from past votes
+        $preferredCategories = [];
+        $stmt = $this->db->prepare(
+            "SELECT p.category, COUNT(*) as c
+             FROM poll_votes pv
+             JOIN polls p ON pv.poll_id = p.id
+             WHERE pv.voter_id = ? AND p.category IS NOT NULL
+             GROUP BY p.category
+             ORDER BY c DESC
+             LIMIT 5"
+        );
+        $stmt->bind_param("i", $voterId);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        foreach ($res as $row) {
+            $preferredCategories[] = $row['category'];
+        }
+
+        // Fallback location
+        if (!$location) {
+            $location = $this->getLastVoterLocation($voterId);
+        }
+
+        // Fetch candidate polls: active, not already voted by this user
+        $stmt = $this->db->prepare(
+            "SELECT p.*
+             FROM polls p
+             WHERE p.is_active = 1
+             AND NOT EXISTS (SELECT 1 FROM poll_votes pv WHERE pv.poll_id = p.id AND pv.voter_id = ?)
+             ORDER BY p.created_at DESC
+             LIMIT 50"
+        );
+        $stmt->bind_param("i", $voterId);
+        $stmt->execute();
+        $candidates = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Score candidates
+        $scored = [];
+        foreach ($candidates as $poll) {
+            $score = 0;
+            if (!empty($preferredCategories) && in_array($poll['category'], $preferredCategories, true)) {
+                $score += 3;
+            }
+            if ($location && !empty($poll['location_tag']) && strcasecmp($location, $poll['location_tag']) === 0) {
+                $score += 2;
+            }
+            $created = strtotime($poll['created_at']);
+            if ($created >= strtotime('-7 days')) {
+                $score += 1; // freshness boost
+            }
+            $scored[] = ['poll' => $poll, 'score' => $score];
+        }
+
+        // Sort by score desc, then created_at desc
+        usort($scored, function ($a, $b) {
+            if ($a['score'] === $b['score']) {
+                return strcmp($b['poll']['created_at'], $a['poll']['created_at']);
+            }
+            return $b['score'] <=> $a['score'];
+        });
+
+        $recommendations = array_slice(array_map(function ($item) {
+            return $item['poll'];
+        }, $scored), 0, $limit);
+
+        // Fallback if empty
+        if (empty($recommendations)) {
+            return $this->getActivePolls($limit);
+        }
+        return $recommendations;
     }
 
     // Get geographical voting breakdown for a poll
