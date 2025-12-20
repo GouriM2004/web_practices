@@ -48,7 +48,7 @@ class Poll
         return $res;
     }
 
-    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null)
+    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null, $confidence_level = 'somewhat_sure')
     {
         // block duplicate votes by voter account or IP
         $dupByUser = false;
@@ -89,9 +89,9 @@ class Poll
             $stmt->execute();
             $stmt->close();
 
-            // insert vote record
-            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, location) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("iisisis", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $locationParam);
+            // insert vote record with confidence level
+            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
             $stmt->execute();
             $stmt->close();
         }
@@ -283,5 +283,48 @@ class Poll
         $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
         return $res ?: [];
+    }
+
+    // Get confidence level statistics for a poll
+    public function getConfidenceStats($poll_id)
+    {
+        // Overall confidence breakdown
+        $stmt = $this->db->prepare("
+            SELECT 
+                confidence_level,
+                COUNT(*) as count,
+                ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM poll_votes WHERE poll_id = ?), 1) as percentage
+            FROM poll_votes
+            WHERE poll_id = ?
+            GROUP BY confidence_level
+            ORDER BY FIELD(confidence_level, 'very_sure', 'somewhat_sure', 'just_guessing')
+        ");
+        $stmt->bind_param("ii", $poll_id, $poll_id);
+        $stmt->execute();
+        $overall = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Confidence breakdown by option
+        $stmt = $this->db->prepare("
+            SELECT 
+                po.id as option_id,
+                po.option_text,
+                pv.confidence_level,
+                COUNT(*) as count
+            FROM poll_votes pv
+            JOIN poll_options po ON pv.option_id = po.id
+            WHERE pv.poll_id = ?
+            GROUP BY po.id, po.option_text, pv.confidence_level
+            ORDER BY po.id, FIELD(pv.confidence_level, 'very_sure', 'somewhat_sure', 'just_guessing')
+        ");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $byOption = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        return [
+            'overall' => $overall,
+            'by_option' => $byOption
+        ];
     }
 }

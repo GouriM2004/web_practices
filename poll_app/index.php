@@ -90,6 +90,29 @@ $recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
                 </div>
 
                 <div class="mb-3 mt-3">
+                  <label class="form-label fw-bold">How confident are you in your choice?</label>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="confidence_level" id="confidence_very" value="very_sure" required <?= $voterLogged ? '' : 'disabled' ?>>
+                    <label class="form-check-label" for="confidence_very">
+                      😊 Very sure
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="confidence_level" id="confidence_somewhat" value="somewhat_sure" checked <?= $voterLogged ? '' : 'disabled' ?>>
+                    <label class="form-check-label" for="confidence_somewhat">
+                      🤔 Somewhat sure
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="confidence_level" id="confidence_guessing" value="just_guessing" <?= $voterLogged ? '' : 'disabled' ?>>
+                    <label class="form-check-label" for="confidence_guessing">
+                      🤷 Just guessing
+                    </label>
+                  </div>
+                  <small class="form-text text-muted">This helps us understand how confident voters are overall</small>
+                </div>
+
+                <div class="mb-3 mt-3">
                   <label for="location" class="form-label">Location (Optional)</label>
                   <input type="text" class="form-control" id="location" name="location"
                     placeholder="e.g., California, New York, Texas" <?= $voterLogged ? '' : 'disabled' ?>>
@@ -141,27 +164,27 @@ $recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
         </div>
 
         <?php if (!empty($recommendations)): ?>
-        <div class="card shadow-sm mt-4">
-          <div class="card-header bg-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Recommended for you</h5>
-            <small class="text-muted">Based on your past votes and location</small>
-          </div>
-          <div class="card-body">
-            <?php foreach ($recommendations as $rec): ?>
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <div>
-                  <strong><?= htmlspecialchars($rec['question']) ?></strong><br>
-                  <small class="text-muted">Category: <?= htmlspecialchars($rec['category'] ?? 'General') ?><?= !empty($rec['location_tag']) ? ' · ' . htmlspecialchars($rec['location_tag']) : '' ?></small>
+          <div class="card shadow-sm mt-4">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">Recommended for you</h5>
+              <small class="text-muted">Based on your past votes and location</small>
+            </div>
+            <div class="card-body">
+              <?php foreach ($recommendations as $rec): ?>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div>
+                    <strong><?= htmlspecialchars($rec['question']) ?></strong><br>
+                    <small class="text-muted">Category: <?= htmlspecialchars($rec['category'] ?? 'General') ?><?= !empty($rec['location_tag']) ? ' · ' . htmlspecialchars($rec['location_tag']) : '' ?></small>
+                  </div>
+                  <div class="btn-group btn-group-sm">
+                    <a href="index.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-primary">Open</a>
+                    <a href="results.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-secondary">Results</a>
+                    <a href="live_dashboard.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-info">Live</a>
+                  </div>
                 </div>
-                <div class="btn-group btn-group-sm">
-                  <a href="index.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-primary">Open</a>
-                  <a href="results.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-secondary">Results</a>
-                  <a href="live_dashboard.php?poll_id=<?= (int)$rec['id'] ?>" class="btn btn-outline-info">Live</a>
-                </div>
-              </div>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
           </div>
-        </div>
         <?php endif; ?>
       </div>
     </div>

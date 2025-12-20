@@ -19,6 +19,7 @@ if (!$poll) {
 $options = $pollModel->getOptions($poll_id);
 $publicVoters = $pollModel->getPublicVoters($poll_id);
 $geoBreakdown = $pollModel->getGeographicalBreakdown($poll_id);
+$confidenceStats = $pollModel->getConfidenceStats($poll_id);
 
 $totalVotes = 0;
 foreach ($options as $opt) {
@@ -34,7 +35,11 @@ $data = [
     ],
     'options' => [],
     'public_voters' => [],
-    'geographical' => []
+    'geographical' => [],
+    'confidence' => [
+        'overall' => [],
+        'by_option' => []
+    ]
 ];
 
 foreach ($options as $opt) {
@@ -70,5 +75,16 @@ foreach ($geoMap as $location => $votes) {
         'votes' => $votes
     ];
 }
+
+// Add confidence statistics
+foreach ($confidenceStats['overall'] as $stat) {
+    $data['confidence']['overall'][] = [
+        'level' => $stat['confidence_level'],
+        'count' => (int)$stat['count'],
+        'percentage' => (float)$stat['percentage']
+    ];
+}
+
+$data['confidence']['by_option'] = $confidenceStats['by_option'];
 
 echo json_encode($data, JSON_PRETTY_PRINT);

@@ -11,6 +11,7 @@ if (!$poll) {
 
 $options = $pollModel->getOptions($poll_id);
 $publicVoters = $pollModel->getPublicVoters($poll_id);
+$confidenceStats = $pollModel->getConfidenceStats($poll_id);
 $totalVotes = 0;
 foreach ($options as $o) $totalVotes += $o['votes'];
 ?>
@@ -65,6 +66,41 @@ foreach ($options as $o) $totalVotes += $o['votes'];
 
             <a href="index.php" class="btn btn-outline-secondary mt-3">Back to Poll</a>
             <a href="live_dashboard.php?poll_id=<?= $poll_id ?>" class="btn btn-outline-info mt-3 ms-2">Live Dashboard</a>
+
+            <?php if (!empty($confidenceStats['overall']) && $totalVotes > 0): ?>
+              <div class="card mt-4">
+                <div class="card-header bg-white">
+                  <h6 class="mb-0">Voter Confidence Indicator</h6>
+                </div>
+                <div class="card-body">
+                  <p class="text-muted small mb-3">How confident voters are in their choices</p>
+                  <?php 
+                  $confidenceLabels = [
+                    'very_sure' => ['label' => 'Very sure', 'icon' => '😊', 'color' => 'success'],
+                    'somewhat_sure' => ['label' => 'Somewhat sure', 'icon' => '🤔', 'color' => 'warning'],
+                    'just_guessing' => ['label' => 'Just guessing', 'icon' => '🤷', 'color' => 'secondary']
+                  ];
+                  foreach ($confidenceStats['overall'] as $stat): 
+                    $config = $confidenceLabels[$stat['confidence_level']] ?? ['label' => $stat['confidence_level'], 'icon' => '', 'color' => 'info'];
+                  ?>
+                    <div class="mb-2">
+                      <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span><?= $config['icon'] ?> <?= htmlspecialchars($config['label']) ?></span>
+                        <span class="badge bg-<?= $config['color'] ?>"><?= $stat['count'] ?> (<?= $stat['percentage'] ?>%)</span>
+                      </div>
+                      <div class="progress" style="height: 20px;">
+                        <div class="progress-bar bg-<?= $config['color'] ?>" role="progressbar" 
+                             style="width: <?= $stat['percentage'] ?>%;" 
+                             aria-valuenow="<?= $stat['percentage'] ?>" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                        </div>
+                      </div>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+              </div>
+            <?php endif; ?>
 
             <div class="card mt-3">
               <div class="card-body">

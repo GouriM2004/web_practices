@@ -19,6 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $voterId   = VoterAuth::id();
   $voterName = VoterAuth::name();
   $location  = trim($_POST['location'] ?? '');
+  $confidence_level = trim($_POST['confidence_level'] ?? 'somewhat_sure');
+
+  // Validate confidence level
+  $valid_confidence = ['very_sure', 'somewhat_sure', 'just_guessing'];
+  if (!in_array($confidence_level, $valid_confidence)) {
+    $confidence_level = 'somewhat_sure';
+  }
 
   $pollModel = new Poll();
 
@@ -33,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 
   if ($poll_id && !empty($option_ids)) {
-    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location);
+    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location, $confidence_level);
     if ($ok) {
       header("Location: results.php?poll_id=" . $poll_id);
       exit;

@@ -161,6 +161,32 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             </div>
         </div>
 
+        <!-- Confidence Indicator -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">Voter Confidence Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" style="height: 300px;">
+                            <canvas id="confidenceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">Confidence Breakdown</h5>
+                    </div>
+                    <div class="card-body" id="confidenceBreakdown">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Geographical Voting Map -->
         <div class="row mt-4" id="geoSection" style="display: none;">
             <div class="col-12">
@@ -185,7 +211,7 @@ foreach ($options as $o) $totalVotes += $o['votes'];
 
     <script>
         const pollId = <?= $poll_id ?>;
-        let pieChart, barChart;
+        let pieChart, barChart, confidenceChart;
 
         // Color palette
         const colors = [
@@ -289,6 +315,130 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                 barChart.data.datasets[0].data = votes;
                 barChart.update('none');
             }
+        }
+
+        function initConfidenceChart(data) {
+            if (!data.confidence || !data.confidence.overall || data.confidence.overall.length === 0) {
+                return;
+            }
+
+            const confidenceLabels = {
+                'very_sure': 'Very sure 😊',
+                'somewhat_sure': 'Somewhat sure 🤔',
+                'just_guessing': 'Just guessing 🤷'
+            };
+
+            const confidenceColors = {
+                'very_sure': 'rgba(40, 167, 69, 0.8)',
+                'somewhat_sure': 'rgba(255, 193, 7, 0.8)',
+                'just_guessing': 'rgba(108, 117, 125, 0.8)'
+            };
+
+            const labels = data.confidence.overall.map(c => confidenceLabels[c.level] || c.level);
+            const counts = data.confidence.overall.map(c => c.count);
+            const bgColors = data.confidence.overall.map(c => confidenceColors[c.level] || 'rgba(128, 128, 128, 0.8)');
+
+            const confidenceCtx = document.getElementById('confidenceChart').getContext('2d');
+            confidenceChart = new Chart(confidenceCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: bgColors,
+                        borderColor: bgColors.map(c => c.replace('0.8', '1')),
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                    return `${label}: ${value} votes (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateConfidenceChart(data) {
+            if (!data.confidence || !data.confidence.overall || data.confidence.overall.length === 0) {
+                return;
+            }
+
+            const confidenceLabels = {
+                'very_sure': 'Very sure 😊',
+                'somewhat_sure': 'Somewhat sure 🤔',
+                'just_guessing': 'Just guessing 🤷'
+            };
+
+            const confidenceColors = {
+                'very_sure': 'rgba(40, 167, 69, 0.8)',
+                'somewhat_sure': 'rgba(255, 193, 7, 0.8)',
+                'just_guessing': 'rgba(108, 117, 125, 0.8)'
+            };
+
+            const labels = data.confidence.overall.map(c => confidenceLabels[c.level] || c.level);
+            const counts = data.confidence.overall.map(c => c.count);
+            const bgColors = data.confidence.overall.map(c => confidenceColors[c.level] || 'rgba(128, 128, 128, 0.8)');
+
+            if (confidenceChart) {
+                confidenceChart.data.labels = labels;
+                confidenceChart.data.datasets[0].data = counts;
+                confidenceChart.data.datasets[0].backgroundColor = bgColors;
+                confidenceChart.update('none');
+            }
+
+            // Update confidence breakdown text
+            const breakdownContainer = document.getElementById('confidenceBreakdown');
+            let html = '';
+            
+            data.confidence.overall.forEach(stat => {
+                const badgeColor = {
+                    'very_sure': 'success',
+                    'somewhat_sure': 'warning',
+                    'just_guessing': 'secondary'
+                }[stat.level] || 'info';
+
+                const icon = {
+                    'very_sure': '😊',
+                    'somewhat_sure': '🤔',
+                    'just_guessing': '🤷'
+                }[stat.level] || '';
+
+                const label = confidenceLabels[stat.level] || stat.level;
+
+                html += `
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span>${icon} ${label}</span>
+                            <span class="badge bg-${badgeColor}">${stat.count} (${stat.percentage}%)</span>
+                        </div>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar bg-${badgeColor}" role="progressbar" 
+                                 style="width: ${stat.percentage}%;" 
+                                 aria-valuenow="${stat.percentage}" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            breakdownContainer.innerHTML = html;
         }
 
         function updateResultsTable(data) {
@@ -402,6 +552,9 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                     // Update charts
                     updateCharts(data);
 
+                    // Update confidence chart
+                    updateConfidenceChart(data);
+
                     // Update table
                     updateResultsTable(data);
 
@@ -433,11 +586,13 @@ foreach ($options as $o) $totalVotes += $o['votes'];
 
                 // Initialize charts
                 initCharts(data);
+                initConfidenceChart(data);
 
                 // Populate table and voters
                 updateResultsTable(data);
                 updatePublicVoters(data);
                 updateGeographicalBreakdown(data);
+                updateConfidenceChart(data);
 
                 // Start auto-refresh every 3 seconds
                 setInterval(updateDashboard, 3000);
