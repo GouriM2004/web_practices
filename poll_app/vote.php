@@ -40,8 +40,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 
   if ($poll_id && !empty($option_ids)) {
-    $ok = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location, $confidence_level);
-    if ($ok) {
+    $res = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location, $confidence_level);
+    if (is_array($res)) {
+      if (!empty($res['ok'])) {
+        header("Location: results.php?poll_id=" . $poll_id);
+        exit;
+      }
+      $msg = ($res['reason'] ?? '') === 'locked'
+        ? "Your vote is locked and can no longer be changed."
+        : "Your vote could not be recorded. Please try again.";
+    } elseif ($res) {
       header("Location: results.php?poll_id=" . $poll_id);
       exit;
     } else {

@@ -1,8 +1,10 @@
 <?php
 // includes/Config.php
-class Config {
+class Config
+{
     const DB_HOST = 'localhost';
     const DB_USER = 'root';
     const DB_PASS = '';
     const DB_NAME = 'poll_app';
+    const VOTE_CHANGE_WINDOW_MINUTES = 5;
 }

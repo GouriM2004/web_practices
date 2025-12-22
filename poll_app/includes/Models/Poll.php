@@ -50,53 +50,122 @@ class Poll
 
     public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null, $confidence_level = 'somewhat_sure')
     {
-        // block duplicate votes by voter account or IP
-        $dupByUser = false;
-        if ($voterId !== null) {
-            $stmt = $this->db->prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND voter_id = ? LIMIT 1");
-            $stmt->bind_param("ii", $poll_id, $voterId);
-            $stmt->execute();
-            $dupByUser = $stmt->get_result()->num_rows > 0;
-            $stmt->close();
-        }
-
-        $stmt = $this->db->prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND voter_ip = ? LIMIT 1");
-        $stmt->bind_param("is", $poll_id, $ip);
-        $stmt->execute();
-        $dupByIp = $stmt->get_result()->num_rows > 0;
-        $stmt->close();
-
-        if ($dupByUser || $dupByIp) return false;
-
         // normalize to array
         if (!is_array($option_ids)) {
             $option_ids = [$option_ids];
         }
+        $option_ids = array_values(array_filter(array_map('intval', $option_ids), function ($id) {
+            return $id > 0;
+        }));
 
         $voterIdParam = $voterId ?? null;
         $voterNameParam = $voterName ?? null;
         $isPublicFlag = $isPublic ? 1 : 0;
         $locationParam = $location ?? null;
 
-        // process each selected option
-        foreach ($option_ids as $option_id) {
-            $option_id = (int)$option_id;
-            if ($option_id <= 0) continue;
-
-            // increase vote count
-            $stmt = $this->db->prepare("UPDATE poll_options SET votes = votes + 1 WHERE id = ? AND poll_id = ?");
-            $stmt->bind_param("ii", $option_id, $poll_id);
+        // Fetch any existing votes by this voter or IP for the poll
+        $existing = [];
+        if ($voterId !== null) {
+            $stmt = $this->db->prepare("SELECT id, option_id, voted_at FROM poll_votes WHERE poll_id = ? AND voter_id = ?");
+            $stmt->bind_param("ii", $poll_id, $voterId);
             $stmt->execute();
+            $existing = $stmt->get_result()->fetch_all(MYSQLI_ASSOC) ?: [];
             $stmt->close();
-
-            // insert vote record with confidence level
-            $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
+        } else {
+            $stmt = $this->db->prepare("SELECT id, option_id, voted_at FROM poll_votes WHERE poll_id = ? AND voter_ip = ?");
+            $stmt->bind_param("is", $poll_id, $ip);
             $stmt->execute();
+            $existing = $stmt->get_result()->fetch_all(MYSQLI_ASSOC) ?: [];
             $stmt->close();
         }
 
-        return true;
+        // If no previous vote: fresh insert
+        if (empty($existing)) {
+            $this->db->begin_transaction();
+            try {
+                foreach ($option_ids as $option_id) {
+                    $stmt = $this->db->prepare("UPDATE poll_options SET votes = votes + 1 WHERE id = ? AND poll_id = ?");
+                    $stmt->bind_param("ii", $option_id, $poll_id);
+                    $stmt->execute();
+                    $stmt->close();
+
+                    $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+                $this->db->commit();
+                return ['ok' => true, 'updated' => false];
+            } catch (\Throwable $e) {
+                $this->db->rollback();
+                return ['ok' => false, 'reason' => 'error'];
+            }
+        }
+
+        // Previous vote exists: check change window
+        $windowMinutes = \Config::VOTE_CHANGE_WINDOW_MINUTES ?? 0;
+        if ($windowMinutes <= 0) {
+            return ['ok' => false, 'reason' => 'locked'];
+        }
+
+        $latestVotedAt = null;
+        foreach ($existing as $row) {
+            $ts = strtotime($row['voted_at']);
+            if ($ts && ($latestVotedAt === null || $ts > $latestVotedAt)) {
+                $latestVotedAt = $ts;
+            }
+        }
+        if ($latestVotedAt === null) {
+            return ['ok' => false, 'reason' => 'locked'];
+        }
+
+        $deadline = $latestVotedAt + ($windowMinutes * 60);
+        if (time() > $deadline) {
+            return ['ok' => false, 'reason' => 'locked'];
+        }
+
+        // Within window: replace previous choices with new ones
+        $this->db->begin_transaction();
+        try {
+            // Decrement counts for previous options
+            foreach ($existing as $row) {
+                $prevOptionId = (int)$row['option_id'];
+                $stmt = $this->db->prepare("UPDATE poll_options SET votes = GREATEST(votes - 1, 0) WHERE id = ? AND poll_id = ?");
+                $stmt->bind_param("ii", $prevOptionId, $poll_id);
+                $stmt->execute();
+                $stmt->close();
+            }
+
+            // Delete previous vote records
+            if ($voterId !== null) {
+                $stmt = $this->db->prepare("DELETE FROM poll_votes WHERE poll_id = ? AND voter_id = ?");
+                $stmt->bind_param("ii", $poll_id, $voterId);
+            } else {
+                $stmt = $this->db->prepare("DELETE FROM poll_votes WHERE poll_id = ? AND voter_ip = ?");
+                $stmt->bind_param("is", $poll_id, $ip);
+            }
+            $stmt->execute();
+            $stmt->close();
+
+            // Insert new selections
+            foreach ($option_ids as $option_id) {
+                $stmt = $this->db->prepare("UPDATE poll_options SET votes = votes + 1 WHERE id = ? AND poll_id = ?");
+                $stmt->bind_param("ii", $option_id, $poll_id);
+                $stmt->execute();
+                $stmt->close();
+
+                $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
+                $stmt->execute();
+                $stmt->close();
+            }
+
+            $this->db->commit();
+            return ['ok' => true, 'updated' => true, 'deadline' => $deadline];
+        } catch (\Throwable $e) {
+            $this->db->rollback();
+            return ['ok' => false, 'reason' => 'error'];
+        }
     }
 
     public function getAllPolls()

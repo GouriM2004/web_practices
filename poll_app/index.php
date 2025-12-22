@@ -126,6 +126,9 @@ $recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
                 <a href="live_dashboard.php?poll_id=<?= $poll['id'] ?>" class="btn btn-outline-info mt-3 ms-2">
                   Live Dashboard
                 </a>
+                <div class="mt-2">
+                  <small class="text-muted">You can change your vote within <?= (int)Config::VOTE_CHANGE_WINDOW_MINUTES ?> minutes.</small>
+                </div>
               </form>
               <div class="card mt-3">
                 <div class="card-body">

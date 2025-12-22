@@ -10,6 +10,7 @@ A feature-rich polling application with single and multiple choice support.
 - **Anonymous vs Public Voting**: Voters choose to display their name in results or stay anonymous
 - **Admin Dashboard**: Manage polls, view results, toggle active status
 - **Real-time Results**: Live vote counts with percentage bars
+- **Vote Change Window**: Voters can change their vote within a configurable time window
 
 ## Setup
 
@@ -45,3 +46,11 @@ When creating a new poll in the admin panel:
 2. Add at least 2 options
 3. Check the **"Allow multiple choice"** checkbox to enable multiple selections
 4. Users will see checkboxes instead of radio buttons for multiple choice polls
+
+## Vote Change Window
+
+You can allow voters to change their vote within a short time window after submitting.
+
+- Configure the window in `includes/Config.php` using `VOTE_CHANGE_WINDOW_MINUTES` (default: 5).
+- If a voter resubmits within this window, their previous choice(s) will be replaced and vote counts updated.
+- After the window expires, votes are locked and cannot be changed.
