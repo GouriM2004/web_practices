@@ -20,11 +20,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $voterName = VoterAuth::name();
   $location  = trim($_POST['location'] ?? '');
   $confidence_level = trim($_POST['confidence_level'] ?? 'somewhat_sure');
+  $voter_type = trim($_POST['voter_type'] ?? 'public');
 
   // Validate confidence level
   $valid_confidence = ['very_sure', 'somewhat_sure', 'just_guessing'];
   if (!in_array($confidence_level, $valid_confidence)) {
     $confidence_level = 'somewhat_sure';
+  }
+
+  // Validate voter type for weighted polls
+  $valid_voter_types = ['expert', 'student', 'public'];
+  if (!in_array($voter_type, $valid_voter_types)) {
+    $voter_type = 'public';
   }
 
   $pollModel = new Poll();
@@ -40,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 
   if ($poll_id && !empty($option_ids)) {
-    $res = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location, $confidence_level);
+    $res = $pollModel->recordVote($poll_id, $option_ids, $ip, $voterId, $voterName, $is_public, $location, $confidence_level, $voter_type);
     if (is_array($res)) {
       if (!empty($res['ok'])) {
         header("Location: results.php?poll_id=" . $poll_id);

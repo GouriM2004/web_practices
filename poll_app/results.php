@@ -12,6 +12,10 @@ if (!$poll) {
 $options = $pollModel->getOptions($poll_id);
 $publicVoters = $pollModel->getPublicVoters($poll_id);
 $confidenceStats = $pollModel->getConfidenceStats($poll_id);
+$layeredResults = $pollModel->getVoterTypeLayeredResults($poll_id);
+$layeredOptions = $layeredResults['options'] ?? [];
+$layeredTotals = $layeredResults['totals'] ?? ['by_type' => [], 'weighted_total' => 0];
+$layeredWeights = $layeredResults['weights'] ?? ['expert' => 2.0, 'student' => 1.5, 'public' => 1.0];
 $totalVotes = 0;
 foreach ($options as $o) $totalVotes += $o['votes'];
 ?>
@@ -64,6 +68,51 @@ foreach ($options as $o) $totalVotes += $o['votes'];
               <?php endforeach; ?>
             <?php endif; ?>
 
+            <?php if (!empty($layeredOptions)): ?>
+              <?php
+              $expertTotal = $layeredTotals['by_type']['expert'] ?? 0;
+              $studentTotal = $layeredTotals['by_type']['student'] ?? 0;
+              $publicTotal = $layeredTotals['by_type']['public'] ?? 0;
+              $weightedTotal = $layeredTotals['weighted_total'] ?? 0;
+              ?>
+              <div class="card mt-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                  <h6 class="mb-0">Layered Results (Expert / Student / Public)</h6>
+                  <small class="text-muted">Weights: Expert x<?= $layeredWeights['expert'] ?> | Student x<?= $layeredWeights['student'] ?> | Public x<?= $layeredWeights['public'] ?></small>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex flex-wrap gap-2 mb-3">
+                    <span class="badge bg-primary">Experts: <?= $expertTotal ?></span>
+                    <span class="badge bg-info text-dark">Students: <?= $studentTotal ?></span>
+                    <span class="badge bg-secondary">Public: <?= $publicTotal ?></span>
+                    <span class="badge bg-dark">Weighted total: <?= number_format((float)$weightedTotal, 1) ?></span>
+                  </div>
+
+                  <?php foreach ($layeredOptions as $opt):
+                    $byType = $opt['by_type'] ?? [];
+                    $expert = $byType['expert']['count'] ?? 0;
+                    $student = $byType['student']['count'] ?? 0;
+                    $public = $byType['public']['count'] ?? 0;
+                  ?>
+                    <div class="mb-3">
+                      <div class="d-flex justify-content-between">
+                        <strong><?= htmlspecialchars($opt['text']) ?></strong>
+                        <span><?= number_format((float)$opt['weighted_votes'], 1) ?> weighted (<?= $opt['weighted_percentage'] ?>%)</span>
+                      </div>
+                      <div class="progress mb-2" style="height: 8px;">
+                        <div class="progress-bar bg-primary" style="width: <?= $opt['weighted_percentage'] ?>%;"></div>
+                      </div>
+                      <div class="d-flex flex-wrap gap-3 small text-muted">
+                        <span>Expert: <?= $expert ?> (×<?= $layeredWeights['expert'] ?>)</span>
+                        <span>Student: <?= $student ?> (×<?= $layeredWeights['student'] ?>)</span>
+                        <span>Public: <?= $public ?> (×<?= $layeredWeights['public'] ?>)</span>
+                      </div>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+              </div>
+            <?php endif; ?>
+
             <a href="index.php" class="btn btn-outline-secondary mt-3">Back to Poll</a>
             <a href="live_dashboard.php?poll_id=<?= $poll_id ?>" class="btn btn-outline-info mt-3 ms-2">Live Dashboard</a>
 
@@ -74,13 +123,13 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                 </div>
                 <div class="card-body">
                   <p class="text-muted small mb-3">How confident voters are in their choices</p>
-                  <?php 
+                  <?php
                   $confidenceLabels = [
                     'very_sure' => ['label' => 'Very sure', 'icon' => '😊', 'color' => 'success'],
                     'somewhat_sure' => ['label' => 'Somewhat sure', 'icon' => '🤔', 'color' => 'warning'],
                     'just_guessing' => ['label' => 'Just guessing', 'icon' => '🤷', 'color' => 'secondary']
                   ];
-                  foreach ($confidenceStats['overall'] as $stat): 
+                  foreach ($confidenceStats['overall'] as $stat):
                     $config = $confidenceLabels[$stat['confidence_level']] ?? ['label' => $stat['confidence_level'], 'icon' => '', 'color' => 'info'];
                   ?>
                     <div class="mb-2">
@@ -89,11 +138,11 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                         <span class="badge bg-<?= $config['color'] ?>"><?= $stat['count'] ?> (<?= $stat['percentage'] ?>%)</span>
                       </div>
                       <div class="progress" style="height: 20px;">
-                        <div class="progress-bar bg-<?= $config['color'] ?>" role="progressbar" 
-                             style="width: <?= $stat['percentage'] ?>%;" 
-                             aria-valuenow="<?= $stat['percentage'] ?>" 
-                             aria-valuemin="0" 
-                             aria-valuemax="100">
+                        <div class="progress-bar bg-<?= $config['color'] ?>" role="progressbar"
+                          style="width: <?= $stat['percentage'] ?>%;"
+                          aria-valuenow="<?= $stat['percentage'] ?>"
+                          aria-valuemin="0"
+                          aria-valuemax="100">
                         </div>
                       </div>
                     </div>

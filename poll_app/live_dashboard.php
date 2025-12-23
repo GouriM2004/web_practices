@@ -145,6 +145,21 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             </div>
         </div>
 
+        <!-- Layered Results -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Layered Results (Expert / Student / Public)</h5>
+                        <small class="text-muted" id="layeredWeights">Weights updating...</small>
+                    </div>
+                    <div class="card-body" id="layeredResultsBody">
+                        <p class="text-muted mb-0">Waiting for layered votes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Public Voters -->
         <div class="row mt-4">
             <div class="col-12">
@@ -404,19 +419,19 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             // Update confidence breakdown text
             const breakdownContainer = document.getElementById('confidenceBreakdown');
             let html = '';
-            
+
             data.confidence.overall.forEach(stat => {
                 const badgeColor = {
                     'very_sure': 'success',
                     'somewhat_sure': 'warning',
                     'just_guessing': 'secondary'
-                }[stat.level] || 'info';
+                } [stat.level] || 'info';
 
                 const icon = {
                     'very_sure': '😊',
                     'somewhat_sure': '🤔',
                     'just_guessing': '🤷'
-                }[stat.level] || '';
+                } [stat.level] || '';
 
                 const label = confidenceLabels[stat.level] || stat.level;
 
@@ -537,6 +552,71 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             container.innerHTML = html;
         }
 
+        function renderLayeredResults(data) {
+            const body = document.getElementById('layeredResultsBody');
+            const weightsLabel = document.getElementById('layeredWeights');
+
+            if (!body) return;
+
+            if (!data.segments || !Array.isArray(data.segments.options)) {
+                body.innerHTML = '<p class="text-muted mb-0">Layered data unavailable.</p>';
+                return;
+            }
+
+            const weights = data.segments.weights || {
+                expert: 2,
+                student: 1.5,
+                public: 1
+            };
+            if (weightsLabel) {
+                weightsLabel.textContent = `Expert x${weights.expert} | Student x${weights.student} | Public x${weights.public}`;
+            }
+
+            if (data.segments.options.length === 0) {
+                body.innerHTML = '<p class="text-muted mb-0">No layered votes yet.</p>';
+                return;
+            }
+
+            const totals = data.segments.totals || {};
+            const byType = totals.by_type || {};
+            const weightedTotal = totals.weighted_total || 0;
+
+            let html = '<div class="d-flex flex-wrap gap-2 mb-3">';
+            html += `<span class="badge bg-primary">Experts: ${byType.expert || 0}</span>`;
+            html += `<span class="badge bg-info text-dark">Students: ${byType.student || 0}</span>`;
+            html += `<span class="badge bg-secondary">Public: ${byType.public || 0}</span>`;
+            html += `<span class="badge bg-dark">Weighted total: ${Number(weightedTotal).toFixed(1)}</span>`;
+            html += '</div>';
+
+            data.segments.options.forEach(opt => {
+                const byTypeOpt = opt.by_type || {};
+                const expertCount = byTypeOpt.expert ? (byTypeOpt.expert.count || 0) : 0;
+                const studentCount = byTypeOpt.student ? (byTypeOpt.student.count || 0) : 0;
+                const publicCount = byTypeOpt.public ? (byTypeOpt.public.count || 0) : 0;
+                const weightedVotes = Number(opt.weighted_votes || 0).toFixed(1);
+                const weightedPct = opt.weighted_percentage || 0;
+
+                html += `
+            <div class="mb-3">
+                <div class="d-flex justify-content-between">
+                    <strong>${escapeHtml(opt.text)}</strong>
+                    <span>${weightedVotes} weighted (${weightedPct}%)</span>
+                </div>
+                <div class="progress mb-2" style="height: 8px;">
+                    <div class="progress-bar bg-primary" style="width: ${weightedPct}%;"></div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 small text-muted">
+                    <span>Expert: ${expertCount} (x${weights.expert})</span>
+                    <span>Student: ${studentCount} (x${weights.student})</span>
+                    <span>Public: ${publicCount} (x${weights.public})</span>
+                </div>
+            </div>
+        `;
+            });
+
+            body.innerHTML = html;
+        }
+
         function updateDashboard() {
             fetch(`api_poll_results.php?poll_id=${pollId}`)
                 .then(response => response.json())
@@ -563,6 +643,9 @@ foreach ($options as $o) $totalVotes += $o['votes'];
 
                     // Update geographical breakdown
                     updateGeographicalBreakdown(data);
+
+                    // Update layered results
+                    renderLayeredResults(data);
                 })
                 .catch(error => {
                     console.error('Fetch error:', error);
@@ -593,6 +676,7 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                 updatePublicVoters(data);
                 updateGeographicalBreakdown(data);
                 updateConfidenceChart(data);
+                renderLayeredResults(data);
 
                 // Start auto-refresh every 3 seconds
                 setInterval(updateDashboard, 3000);

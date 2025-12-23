@@ -48,7 +48,36 @@ class Poll
         return $res;
     }
 
-    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null, $confidence_level = 'somewhat_sure')
+    private function normalizeVoterType($voterType)
+    {
+        $voterType = strtolower((string)$voterType);
+        $allowed = ['expert', 'student', 'public'];
+        if (!in_array($voterType, $allowed, true)) {
+            return 'public';
+        }
+        return $voterType;
+    }
+
+    private function getVoterTypeWeights()
+    {
+        $default = ['expert' => 2.0, 'student' => 1.5, 'public' => 1.0];
+        $configured = \Config::VOTER_TYPE_WEIGHTS ?? $default;
+        if (!is_array($configured)) {
+            return $default;
+        }
+
+        // Merge configured weights but keep only known types
+        $weights = $default;
+        foreach ($default as $type => $fallbackWeight) {
+            if (isset($configured[$type]) && is_numeric($configured[$type])) {
+                $weights[$type] = (float)$configured[$type];
+            }
+        }
+
+        return $weights;
+    }
+
+    public function recordVote($poll_id, $option_ids, $ip, $voterId = null, $voterName = null, $isPublic = 0, $location = null, $confidence_level = 'somewhat_sure', $voter_type = 'public')
     {
         // normalize to array
         if (!is_array($option_ids)) {
@@ -62,6 +91,7 @@ class Poll
         $voterNameParam = $voterName ?? null;
         $isPublicFlag = $isPublic ? 1 : 0;
         $locationParam = $location ?? null;
+        $voterType = $this->normalizeVoterType($voter_type);
 
         // Fetch any existing votes by this voter or IP for the poll
         $existing = [];
@@ -89,8 +119,8 @@ class Poll
                     $stmt->execute();
                     $stmt->close();
 
-                    $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
+                    $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location, voter_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->bind_param("iisisisss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam, $voterType);
                     $stmt->execute();
                     $stmt->close();
                 }
@@ -154,8 +184,8 @@ class Poll
                 $stmt->execute();
                 $stmt->close();
 
-                $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("iisisiss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam);
+                $stmt = $this->db->prepare("INSERT INTO poll_votes (poll_id, option_id, voter_ip, voter_id, voter_name, is_public, confidence_level, location, voter_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("iisisisss", $poll_id, $option_id, $ip, $voterIdParam, $voterNameParam, $isPublicFlag, $confidence_level, $locationParam, $voterType);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -331,6 +361,150 @@ class Poll
             return $this->getActivePolls($limit);
         }
         return $recommendations;
+    }
+
+    // Weighted and segmented results by voter type (expert/student/public)
+    public function getVoterTypeLayeredResults($poll_id)
+    {
+        $weights = $this->getVoterTypeWeights();
+        $typeOrder = array_keys($weights);
+
+        // Totals by type
+        $totalsByType = array_fill_keys($typeOrder, 0);
+        $stmt = $this->db->prepare(
+            "SELECT COALESCE(voter_type, 'public') AS voter_type, COUNT(*) AS count
+             FROM poll_votes
+             WHERE poll_id = ?
+             GROUP BY COALESCE(voter_type, 'public')"
+        );
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        foreach ($res as $row) {
+            $type = $this->normalizeVoterType($row['voter_type']);
+            $totalsByType[$type] = (int)$row['count'];
+        }
+
+        $weightedByType = [];
+        foreach ($totalsByType as $type => $count) {
+            $weightedByType[$type] = $count * ($weights[$type] ?? 1.0);
+        }
+
+        $rawTotal = array_sum($totalsByType);
+        $weightedTotal = array_sum($weightedByType);
+
+        // Per-option counts by type
+        $options = [];
+        $stmt = $this->db->prepare(
+            "SELECT 
+                po.id AS option_id,
+                po.option_text,
+                COALESCE(pv.voter_type, 'public') AS voter_type,
+                COUNT(*) AS count
+             FROM poll_votes pv
+             JOIN poll_options po ON pv.option_id = po.id
+             WHERE pv.poll_id = ?
+             GROUP BY po.id, po.option_text, COALESCE(pv.voter_type, 'public')
+             ORDER BY po.id"
+        );
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        foreach ($rows as $row) {
+            $optId = (int)$row['option_id'];
+            $type = $this->normalizeVoterType($row['voter_type']);
+            if (!isset($options[$optId])) {
+                $options[$optId] = [
+                    'id' => $optId,
+                    'text' => $row['option_text'],
+                    'raw_votes' => 0,
+                    'weighted_votes' => 0.0,
+                    'by_type' => array_fill_keys($typeOrder, ['count' => 0, 'weighted' => 0.0]),
+                ];
+            }
+            $count = (int)$row['count'];
+            $options[$optId]['by_type'][$type]['count'] = $count;
+            $options[$optId]['by_type'][$type]['weighted'] = $count * ($weights[$type] ?? 1.0);
+        }
+
+        // Aggregate raw and weighted totals per option
+        $stmt = $this->db->prepare(
+            "SELECT 
+                po.id AS option_id,
+                po.option_text,
+                COUNT(*) AS raw_votes,
+                SUM(CASE COALESCE(pv.voter_type, 'public')
+                        WHEN 'expert' THEN ?
+                        WHEN 'student' THEN ?
+                        ELSE ?
+                    END) AS weighted_votes
+             FROM poll_votes pv
+             JOIN poll_options po ON pv.option_id = po.id
+             WHERE pv.poll_id = ?
+             GROUP BY po.id, po.option_text
+             ORDER BY po.id"
+        );
+        $stmt->bind_param("dddi", $weights['expert'], $weights['student'], $weights['public'], $poll_id);
+        $stmt->execute();
+        $aggRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        foreach ($aggRows as $row) {
+            $optId = (int)$row['option_id'];
+            if (!isset($options[$optId])) {
+                $options[$optId] = [
+                    'id' => $optId,
+                    'text' => $row['option_text'],
+                    'raw_votes' => 0,
+                    'weighted_votes' => 0.0,
+                    'by_type' => array_fill_keys($typeOrder, ['count' => 0, 'weighted' => 0.0]),
+                ];
+            }
+            $options[$optId]['raw_votes'] = (int)$row['raw_votes'];
+            $options[$optId]['weighted_votes'] = round((float)$row['weighted_votes'], 2);
+        }
+
+        // Ensure options with zero votes still appear
+        $allPollOptions = $this->getOptions($poll_id);
+        foreach ($allPollOptions as $opt) {
+            $optId = (int)$opt['id'];
+            if (!isset($options[$optId])) {
+                $options[$optId] = [
+                    'id' => $optId,
+                    'text' => $opt['option_text'],
+                    'raw_votes' => 0,
+                    'weighted_votes' => 0.0,
+                    'by_type' => array_fill_keys($typeOrder, ['count' => 0, 'weighted' => 0.0]),
+                ];
+            }
+        }
+
+        // Finalize percentages
+        foreach ($options as $optId => $data) {
+            $options[$optId]['weighted_percentage'] = $weightedTotal > 0
+                ? round(($data['weighted_votes'] / $weightedTotal) * 100, 1)
+                : 0.0;
+        }
+
+        // Ensure deterministic ordering
+        ksort($options);
+
+        return [
+            'weights' => $weights,
+            'totals' => [
+                'raw_total' => $rawTotal,
+                'weighted_total' => round($weightedTotal, 2),
+                'by_type' => $totalsByType,
+                'weighted_by_type' => array_map(function ($val) {
+                    return round($val, 2);
+                }, $weightedByType),
+            ],
+            'options' => array_values($options),
+        ];
     }
 
     // Get geographical voting breakdown for a poll

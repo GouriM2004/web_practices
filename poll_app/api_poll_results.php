@@ -20,6 +20,7 @@ $options = $pollModel->getOptions($poll_id);
 $publicVoters = $pollModel->getPublicVoters($poll_id);
 $geoBreakdown = $pollModel->getGeographicalBreakdown($poll_id);
 $confidenceStats = $pollModel->getConfidenceStats($poll_id);
+$layeredResults = $pollModel->getVoterTypeLayeredResults($poll_id);
 
 $totalVotes = 0;
 foreach ($options as $opt) {
@@ -39,6 +40,11 @@ $data = [
     'confidence' => [
         'overall' => [],
         'by_option' => []
+    ],
+    'segments' => [
+        'weights' => $layeredResults['weights'] ?? [],
+        'totals' => $layeredResults['totals'] ?? [],
+        'options' => $layeredResults['options'] ?? []
     ]
 ];
 

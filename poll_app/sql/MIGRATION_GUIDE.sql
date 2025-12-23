@@ -44,3 +44,11 @@ ALTER TABLE poll_votes
 DESCRIBE polls;
 DESCRIBE poll_votes;
 DESCRIBE voters;
+
+-- 3) Weighted opinion polls (expert/student/public)
+ALTER TABLE poll_votes
+  ADD COLUMN IF NOT EXISTS voter_type ENUM('expert','student','public') DEFAULT 'public' AFTER confidence_level;
+
+UPDATE poll_votes 
+SET voter_type = 'public' 
+WHERE voter_type IS NULL;

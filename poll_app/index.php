@@ -90,6 +90,16 @@ $recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
                 </div>
 
                 <div class="mb-3 mt-3">
+                  <label class="form-label fw-bold" for="voter_type">I am voting as</label>
+                  <select class="form-select" id="voter_type" name="voter_type" <?= $voterLogged ? '' : 'disabled' ?> required>
+                    <option value="expert">Expert / Practitioner</option>
+                    <option value="student">Student / Learner</option>
+                    <option value="public" selected>General Public</option>
+                  </select>
+                  <small class="form-text text-muted">Segmented results: experts, students, and the general public.</small>
+                </div>
+
+                <div class="mb-3 mt-3">
                   <label class="form-label fw-bold">How confident are you in your choice?</label>
                   <div class="form-check">
                     <input class="form-check-input" type="radio" name="confidence_level" id="confidence_very" value="very_sure" required <?= $voterLogged ? '' : 'disabled' ?>>

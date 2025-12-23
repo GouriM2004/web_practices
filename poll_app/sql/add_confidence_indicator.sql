@@ -5,7 +5,7 @@ USE poll_app;
 
 -- Add confidence_level column to poll_votes table
 ALTER TABLE poll_votes 
-ADD COLUMN confidence_level ENUM('very_sure', 'somewhat_sure', 'just_guessing') 
+ADD COLUMN IF NOT EXISTS confidence_level ENUM('very_sure', 'somewhat_sure', 'just_guessing') 
 DEFAULT 'somewhat_sure' 
 AFTER is_public;
 
