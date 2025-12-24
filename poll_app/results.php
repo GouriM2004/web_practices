@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/includes/bootstrap.php';
 $pollModel = new Poll();
+$trendAnalyzer = new TrendAnalyzer();
 
 $poll_id = (int)($_GET['poll_id'] ?? 0);
 $poll = $pollModel->getPollById($poll_id);
@@ -18,6 +19,10 @@ $layeredTotals = $layeredResults['totals'] ?? ['by_type' => [], 'weighted_total'
 $layeredWeights = $layeredResults['weights'] ?? ['expert' => 2.0, 'student' => 1.5, 'public' => 1.0];
 $totalVotes = 0;
 foreach ($options as $o) $totalVotes += $o['votes'];
+
+// Get trend data
+$trends = $trendAnalyzer->analyzePollTrends($poll_id);
+$trendSummary = $trendAnalyzer->getPollTrendSummary($poll_id);
 ?>
 <!doctype html>
 <html lang="en">
@@ -55,15 +60,43 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             <?php else: ?>
               <?php foreach ($options as $opt):
                 $percent = $totalVotes ? round(($opt['votes'] / $totalVotes) * 100) : 0;
+                $optionId = $opt['id'];
+                $trendData = $trends[$optionId] ?? null;
               ?>
-                <div class="mb-3">
-                  <div class="d-flex justify-content-between">
+                <div class="mb-3 option-result-card">
+                  <div class="d-flex justify-content-between align-items-start">
                     <span><?= htmlspecialchars($opt['option_text']) ?></span>
-                    <span><?= $opt['votes'] ?> votes (<?= $percent ?>%)</span>
+                    <div class="text-end">
+                      <div class="d-flex align-items-center gap-2">
+                        <span><?= $opt['votes'] ?> votes (<?= $percent ?>%)</span>
+                        <?php if ($trendData): ?>
+                          <span class="trend-arrow" title="<?= htmlspecialchars($trendData['status']) ?>" data-status="<?= $trendData['status'] ?>">
+                            <?= $trendData['direction'] ?>
+                          </span>
+                        <?php endif; ?>
+                      </div>
+                      <?php if ($trendData && $trendData['change_percent'] !== 0): ?>
+                        <small class="text-muted d-block mt-1">
+                          Change: <span class="change-value <?= $trendData['change_percent'] > 0 ? 'text-success' : 'text-danger' ?>">
+                            <?= $trendData['change_percent'] > 0 ? '+' : '' ?><?= $trendData['change_percent'] ?>%
+                          </span>
+                        </small>
+                      <?php endif; ?>
+                    </div>
                   </div>
                   <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="<?= $percent ?>">
                     <div class="progress-bar" style="width: <?= $percent ?>%;"></div>
                   </div>
+                  <?php if ($trendData): ?>
+                    <div class="trend-indicators mt-2 small">
+                      <?php if ($trendData['spike_detected']): ?>
+                        <span class="badge bg-danger">⚡ Spike Alert</span>
+                      <?php endif; ?>
+                      <?php if ($trendData['decay_detected']): ?>
+                        <span class="badge bg-warning text-dark">⬇️ Vote Decay</span>
+                      <?php endif; ?>
+                    </div>
+                  <?php endif; ?>
                 </div>
               <?php endforeach; ?>
             <?php endif; ?>
@@ -76,42 +109,110 @@ foreach ($options as $o) $totalVotes += $o['votes'];
               $weightedTotal = $layeredTotals['weighted_total'] ?? 0;
               ?>
               <div class="card mt-4">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                  <h6 class="mb-0">Layered Results (Expert / Student / Public)</h6>
-                  <small class="text-muted">Weights: Expert x<?= $layeredWeights['expert'] ?> | Student x<?= $layeredWeights['student'] ?> | Public x<?= $layeredWeights['public'] ?></small>
+                <div class="card-header bg-white">
+                  <h6 class="mb-0">📊 Trend Analysis</h6>
                 </div>
                 <div class="card-body">
-                  <div class="d-flex flex-wrap gap-2 mb-3">
-                    <span class="badge bg-primary">Experts: <?= $expertTotal ?></span>
-                    <span class="badge bg-info text-dark">Students: <?= $studentTotal ?></span>
-                    <span class="badge bg-secondary">Public: <?= $publicTotal ?></span>
-                    <span class="badge bg-dark">Weighted total: <?= number_format((float)$weightedTotal, 1) ?></span>
+                  <div class="row">
+                    <?php if (!empty($trendSummary['rising_options'])): ?>
+                      <div class="col-md-6 mb-3">
+                        <h6 class="text-success"><i class="trend-icon">📈</i> Rising Options</h6>
+                        <ul class="list-unstyled small">
+                          <?php foreach ($trendSummary['rising_options'] as $item): ?>
+                            <li class="mb-1">
+                              <strong><?= htmlspecialchars(substr($item['option_text'], 0, 30)) ?></strong>
+                              <br><span class="text-success">+<?= $item['trend_data']['change_percent'] ?>%</span>
+                            </li>
+                          <?php endforeach; ?>
+                        </ul>
+                      </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($trendSummary['falling_options'])): ?>
+                      <div class="col-md-6 mb-3">
+                        <h6 class="text-danger"><i class="trend-icon">📉</i> Falling Options</h6>
+                        <ul class="list-unstyled small">
+                          <?php foreach ($trendSummary['falling_options'] as $item): ?>
+                            <li class="mb-1">
+                              <strong><?= htmlspecialchars(substr($item['option_text'], 0, 30)) ?></strong>
+                              <br><span class="text-danger"><?= $item['trend_data']['change_percent'] ?>%</span>
+                            </li>
+                          <?php endforeach; ?>
+                        </ul>
+                      </div>
+                    <?php endif; ?>
                   </div>
 
-                  <?php foreach ($layeredOptions as $opt):
-                    $byType = $opt['by_type'] ?? [];
-                    $expert = $byType['expert']['count'] ?? 0;
-                    $student = $byType['student']['count'] ?? 0;
-                    $public = $byType['public']['count'] ?? 0;
-                  ?>
-                    <div class="mb-3">
-                      <div class="d-flex justify-content-between">
-                        <strong><?= htmlspecialchars($opt['text']) ?></strong>
-                        <span><?= number_format((float)$opt['weighted_votes'], 1) ?> weighted (<?= $opt['weighted_percentage'] ?>%)</span>
-                      </div>
-                      <div class="progress mb-2" style="height: 8px;">
-                        <div class="progress-bar bg-primary" style="width: <?= $opt['weighted_percentage'] ?>%;"></div>
-                      </div>
-                      <div class="d-flex flex-wrap gap-3 small text-muted">
-                        <span>Expert: <?= $expert ?> (×<?= $layeredWeights['expert'] ?>)</span>
-                        <span>Student: <?= $student ?> (×<?= $layeredWeights['student'] ?>)</span>
-                        <span>Public: <?= $public ?> (×<?= $layeredWeights['public'] ?>)</span>
-                      </div>
+                  <?php if (!empty($trendSummary['spike_alerts']) || !empty($trendSummary['decay_alerts'])): ?>
+                    <hr class="my-3">
+                    <div class="row">
+                      <?php if (!empty($trendSummary['spike_alerts'])): ?>
+                        <div class="col-md-6">
+                          <h6 class="text-danger"><i class="trend-icon">⚡</i> Vote Spikes</h6>
+                          <ul class="list-unstyled small">
+                            <?php foreach ($trendSummary['spike_alerts'] as $item): ?>
+                              <li class="mb-1">
+                                <strong><?= htmlspecialchars(substr($item['option_text'], 0, 30)) ?></strong>
+                              </li>
+                            <?php endforeach; ?>
+                          </ul>
+                        </div>
+                      <?php endif; ?>
+
+                      <?php if (!empty($trendSummary['decay_alerts'])): ?>
+                        <div class="col-md-6">
+                          <h6 class="text-warning"><i class="trend-icon">⬇️</i> Vote Decay</h6>
+                          <ul class="list-unstyled small">
+                            <?php foreach ($trendSummary['decay_alerts'] as $item): ?>
+                              <li class="mb-1">
+                                <strong><?= htmlspecialchars(substr($item['option_text'], 0, 30)) ?></strong>
+                              </li>
+                            <?php endforeach; ?>
+                          </ul>
+                        </div>
+                      <?php endif; ?>
                     </div>
-                  <?php endforeach; ?>
+                  <?php endif; ?>
                 </div>
               </div>
             <?php endif; ?>
+
+            <div class="card mt-4">
+              <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">Layered Results (Expert / Student / Public)</h6>
+                <small class="text-muted">Weights: Expert x<?= $layeredWeights['expert'] ?> | Student x<?= $layeredWeights['student'] ?> | Public x<?= $layeredWeights['public'] ?></small>
+              </div>
+              <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <span class="badge bg-primary">Experts: <?= $expertTotal ?></span>
+                  <span class="badge bg-info text-dark">Students: <?= $studentTotal ?></span>
+                  <span class="badge bg-secondary">Public: <?= $publicTotal ?></span>
+                  <span class="badge bg-dark">Weighted total: <?= number_format((float)$weightedTotal, 1) ?></span>
+                </div>
+
+                <?php foreach ($layeredOptions as $opt):
+                  $byType = $opt['by_type'] ?? [];
+                  $expert = $byType['expert']['count'] ?? 0;
+                  $student = $byType['student']['count'] ?? 0;
+                  $public = $byType['public']['count'] ?? 0;
+                ?>
+                  <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                      <strong><?= htmlspecialchars($opt['text']) ?></strong>
+                      <span><?= number_format((float)$opt['weighted_votes'], 1) ?> weighted (<?= $opt['weighted_percentage'] ?>%)</span>
+                    </div>
+                    <div class="progress mb-2" style="height: 8px;">
+                      <div class="progress-bar bg-primary" style="width: <?= $opt['weighted_percentage'] ?>%;"></div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-3 small text-muted">
+                      <span>Expert: <?= $expert ?> (×<?= $layeredWeights['expert'] ?>)</span>
+                      <span>Student: <?= $student ?> (×<?= $layeredWeights['student'] ?>)</span>
+                      <span>Public: <?= $public ?> (×<?= $layeredWeights['public'] ?>)</span>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
 
             <a href="index.php" class="btn btn-outline-secondary mt-3">Back to Poll</a>
             <a href="live_dashboard.php?poll_id=<?= $poll_id ?>" class="btn btn-outline-info mt-3 ms-2">Live Dashboard</a>

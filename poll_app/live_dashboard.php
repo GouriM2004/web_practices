@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/includes/bootstrap.php';
 $pollModel = new Poll();
+$trendAnalyzer = new TrendAnalyzer();
 
 $poll_id = (int)($_GET['poll_id'] ?? 0);
 $poll = $poll_id ? $pollModel->getPollById($poll_id) : $pollModel->getActivePoll();
@@ -15,6 +16,10 @@ $options = $pollModel->getOptions($poll_id);
 $publicVoters = $pollModel->getPublicVoters($poll_id);
 $totalVotes = 0;
 foreach ($options as $o) $totalVotes += $o['votes'];
+
+// Get trend data
+$trends = $trendAnalyzer->analyzePollTrends($poll_id);
+$trendSummary = $trendAnalyzer->getPollTrendSummary($poll_id);
 ?>
 <!doctype html>
 <html lang="en">
@@ -133,6 +138,7 @@ foreach ($options as $o) $totalVotes += $o['votes'];
                                         <th>Votes</th>
                                         <th>Percentage</th>
                                         <th>Progress</th>
+                                        <th>Trend</th>
                                     </tr>
                                 </thead>
                                 <tbody id="resultsTableBody">
@@ -145,7 +151,23 @@ foreach ($options as $o) $totalVotes += $o['votes'];
             </div>
         </div>
 
-        <!-- Layered Results -->
+        <!-- Trend Analysis -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">📊 Trend Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="trendAnalysisBody">
+                            <div class="col-12">
+                                <p class="text-muted mb-0">Analyzing vote trends...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="row mt-4">
             <div class="col-12">
                 <div class="card shadow-sm">

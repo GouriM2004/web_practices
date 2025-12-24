@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/bootstrap.php';
 require_once __DIR__ . '/../includes/admin_guard.php';
 
 $pollModel = new Poll();
+$trendAnalyzer = new TrendAnalyzer();
 
 if (isset($_GET['toggle'], $_GET['id'])) {
   $pollModel->toggleActive((int)$_GET['id']);
@@ -62,17 +63,22 @@ $polls = $pollModel->getAllPolls();
                 <th>Status</th>
                 <th>Created At</th>
                 <th>Options</th>
+                <th>Trends</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               <?php if (empty($polls)): ?>
                 <tr>
-                  <td colspan="7" class="text-center p-3">No polls created yet.</td>
+                  <td colspan="8" class="text-center p-3">No polls created yet.</td>
                 </tr>
               <?php else: ?>
                 <?php foreach ($polls as $poll): ?>
-                  <?php $optCount = $pollModel->countOptions((int)$poll['id']); ?>
+                  <?php
+                  $optCount = $pollModel->countOptions((int)$poll['id']);
+                  $trendSummary = $trendAnalyzer->getPollTrendSummary((int)$poll['id']);
+                  $totalTrends = count($trendSummary['rising_options']) + count($trendSummary['falling_options']) + count($trendSummary['spike_alerts']) + count($trendSummary['decay_alerts']);
+                  ?>
                   <tr>
                     <td><?= (int)$poll['id'] ?></td>
                     <td><?= htmlspecialchars($poll['question']) ?></td>
@@ -92,6 +98,25 @@ $polls = $pollModel->getAllPolls();
                     </td>
                     <td><?= htmlspecialchars($poll['created_at']) ?></td>
                     <td><?= $optCount ?></td>
+                    <td>
+                      <div class="d-flex flex-wrap gap-1">
+                        <?php if (!empty($trendSummary['rising_options'])): ?>
+                          <span class="badge bg-success" title="Rising options">📈 <?= count($trendSummary['rising_options']) ?></span>
+                        <?php endif; ?>
+                        <?php if (!empty($trendSummary['falling_options'])): ?>
+                          <span class="badge bg-danger" title="Falling options">📉 <?= count($trendSummary['falling_options']) ?></span>
+                        <?php endif; ?>
+                        <?php if (!empty($trendSummary['spike_alerts'])): ?>
+                          <span class="badge bg-warning text-dark" title="Vote spikes">⚡ <?= count($trendSummary['spike_alerts']) ?></span>
+                        <?php endif; ?>
+                        <?php if (!empty($trendSummary['decay_alerts'])): ?>
+                          <span class="badge bg-info text-dark" title="Vote decay">⬇️ <?= count($trendSummary['decay_alerts']) ?></span>
+                        <?php endif; ?>
+                        <?php if ($totalTrends === 0): ?>
+                          <span class="badge bg-secondary">No trends</span>
+                        <?php endif; ?>
+                      </div>
+                    </td>
                     <td>
                       <div class="btn-group btn-group-sm" role="group">
                         <a href="?toggle=1&id=<?= (int)$poll['id'] ?>" class="btn btn-outline-primary">
