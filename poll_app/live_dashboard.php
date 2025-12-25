@@ -29,6 +29,7 @@ $trendSummary = $trendAnalyzer->getPollTrendSummary($poll_id);
     <title>Live Dashboard - Poll System</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
@@ -67,9 +68,19 @@ $trendSummary = $trendAnalyzer->getPollTrendSummary($poll_id);
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
             <a class="navbar-brand" href="index.php">Poll System</a>
-            <div class="d-flex align-items-center text-white">
-                <span class="refresh-indicator"></span>
-                <small>Live Updates</small>
+            <div class="d-flex align-items-center gap-3">
+                <div class="d-flex align-items-center text-white">
+                    <span class="refresh-indicator"></span>
+                    <small>Live Updates</small>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="replay_results.php?poll_id=<?= $poll_id ?>" class="btn btn-light btn-sm">
+                        <i class="fas fa-history"></i> Time Replay
+                    </a>
+                    <a href="results.php?poll_id=<?= $poll_id ?>" class="btn btn-light btn-sm">
+                        <i class="fas fa-chart-bar"></i> Results
+                    </a>
+                </div>
             </div>
         </div>
     </nav>

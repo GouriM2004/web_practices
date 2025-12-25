@@ -570,4 +570,132 @@ class Poll
             'by_option' => $byOption
         ];
     }
+
+    /**
+     * Get historical snapshots of poll results over time
+     * Returns an array of snapshots showing how votes evolved
+     * 
+     * @param int $poll_id The poll ID
+     * @param int $numSnapshots Number of time points to generate (default 20)
+     * @return array Array with 'snapshots' containing time-based data
+     */
+    public function getHistoricalSnapshots($poll_id, $numSnapshots = 20)
+    {
+        // Get poll info and options
+        $poll = $this->getPollById($poll_id);
+        if (!$poll) {
+            return ['error' => 'Poll not found'];
+        }
+
+        $options = $this->getOptions($poll_id);
+
+        // Get earliest and latest vote times
+        $stmt = $this->db->prepare("
+            SELECT 
+                MIN(voted_at) as first_vote,
+                MAX(voted_at) as last_vote,
+                COUNT(*) as total_votes
+            FROM poll_votes 
+            WHERE poll_id = ?
+        ");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $timeRange = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$timeRange || !$timeRange['first_vote'] || $timeRange['total_votes'] == 0) {
+            return [
+                'poll' => [
+                    'id' => $poll['id'],
+                    'question' => $poll['question']
+                ],
+                'options' => array_map(function ($opt) {
+                    return [
+                        'id' => $opt['id'],
+                        'text' => $opt['option_text']
+                    ];
+                }, $options),
+                'snapshots' => [],
+                'message' => 'No votes yet'
+            ];
+        }
+
+        $firstVote = strtotime($timeRange['first_vote']);
+        $lastVote = strtotime($timeRange['last_vote']);
+
+        // If all votes happened at same time, create single snapshot
+        if ($firstVote == $lastVote) {
+            $numSnapshots = 1;
+        }
+
+        $snapshots = [];
+        $timeInterval = ($lastVote - $firstVote) / max(($numSnapshots - 1), 1);
+
+        // Generate snapshots
+        for ($i = 0; $i < $numSnapshots; $i++) {
+            $snapshotTime = $firstVote + ($timeInterval * $i);
+            $snapshotDate = date('Y-m-d H:i:s', $snapshotTime);
+
+            // Get votes up to this point in time
+            $stmt = $this->db->prepare("
+                SELECT 
+                    po.id as option_id,
+                    po.option_text,
+                    COUNT(*) as votes
+                FROM poll_votes pv
+                JOIN poll_options po ON pv.option_id = po.id
+                WHERE pv.poll_id = ? AND pv.voted_at <= ?
+                GROUP BY po.id, po.option_text
+                ORDER BY po.id
+            ");
+            $stmt->bind_param("is", $poll_id, $snapshotDate);
+            $stmt->execute();
+            $votesAtTime = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+
+            // Create a map of votes by option
+            $voteMap = [];
+            $totalVotes = 0;
+            foreach ($votesAtTime as $vote) {
+                $voteMap[$vote['option_id']] = (int)$vote['votes'];
+                $totalVotes += (int)$vote['votes'];
+            }
+
+            // Build snapshot with all options (including those with 0 votes)
+            $snapshotOptions = [];
+            foreach ($options as $opt) {
+                $votes = $voteMap[$opt['id']] ?? 0;
+                $percentage = $totalVotes > 0 ? round(($votes / $totalVotes) * 100, 1) : 0;
+
+                $snapshotOptions[] = [
+                    'id' => $opt['id'],
+                    'text' => $opt['option_text'],
+                    'votes' => $votes,
+                    'percentage' => $percentage
+                ];
+            }
+
+            $snapshots[] = [
+                'timestamp' => $snapshotTime,
+                'datetime' => $snapshotDate,
+                'formatted_time' => date('M j, Y g:i A', $snapshotTime),
+                'total_votes' => $totalVotes,
+                'options' => $snapshotOptions
+            ];
+        }
+
+        return [
+            'poll' => [
+                'id' => $poll['id'],
+                'question' => $poll['question'],
+                'allow_multiple' => (bool)$poll['allow_multiple']
+            ],
+            'time_range' => [
+                'start' => date('Y-m-d H:i:s', $firstVote),
+                'end' => date('Y-m-d H:i:s', $lastVote),
+                'duration_seconds' => $lastVote - $firstVote
+            ],
+            'snapshots' => $snapshots
+        ];
+    }
 }

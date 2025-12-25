@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time-Based Result Replay - Feature Demo</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 2rem 0;
+      }
+      .demo-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        padding: 2rem;
+        margin-bottom: 2rem;
+      }
+      .feature-icon {
+        font-size: 3rem;
+        color: #667eea;
+        margin-bottom: 1rem;
+      }
+      .step-number {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        background: #667eea;
+        color: white;
+        border-radius: 50%;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 1rem;
+      }
+      .screenshot-placeholder {
+        background: #f8f9fa;
+        border: 2px dashed #dee2e6;
+        border-radius: 8px;
+        padding: 3rem;
+        text-align: center;
+        color: #6c757d;
+        margin: 1rem 0;
+      }
+      .control-demo {
+        display: inline-flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin: 0.5rem;
+      }
+      .slider-demo {
+        width: 300px;
+        height: 6px;
+        background: #dee2e6;
+        border-radius: 3px;
+        position: relative;
+      }
+      .slider-thumb {
+        width: 20px;
+        height: 20px;
+        background: #667eea;
+        border-radius: 50%;
+        position: absolute;
+        top: -7px;
+        left: 40%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .play-btn-demo {
+        width: 50px;
+        height: 50px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 1.5rem;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      }
+      .use-case {
+        padding: 1.5rem;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        border-left: 4px solid #667eea;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="text-center mb-5">
+        <h1 class="text-white display-4 mb-3">
+          <i class="fas fa-history"></i> Time-Based Result Replay
+        </h1>
+        <p class="text-white lead">Watch Your Poll Results Evolve Over Time</p>
+      </div>
+
+      <!-- Feature Overview -->
+      <div class="demo-card">
+        <div class="text-center">
+          <div class="feature-icon">
+            <i class="fas fa-clock"></i>
+          </div>
+          <h2 class="mb-4">What is Time-Based Result Replay?</h2>
+          <p class="lead">
+            An interactive feature that lets you travel through time to see how
+            poll results changed as votes were cast. Perfect for understanding
+            voting patterns, trends, and momentum!
+          </p>
+        </div>
+      </div>
+
+      <!-- Key Features -->
+      <div class="demo-card">
+        <h3 class="mb-4">
+          <i class="fas fa-star text-warning"></i> Key Features
+        </h3>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <div class="d-flex align-items-start">
+              <i class="fas fa-sliders-h fa-2x text-primary me-3 mt-1"></i>
+              <div>
+                <h5>Interactive Timeline Slider</h5>
+                <p class="text-muted">
+                  Drag to any point in time to see results at that exact moment
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="d-flex align-items-start">
+              <i class="fas fa-play-circle fa-2x text-success me-3 mt-1"></i>
+              <div>
+                <h5>Auto-Play Functionality</h5>
+                <p class="text-muted">
+                  Watch results evolve automatically with customizable speed
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="d-flex align-items-start">
+              <i class="fas fa-chart-pie fa-2x text-info me-3 mt-1"></i>
+              <div>
+                <h5>Dynamic Charts</h5>
+                <p class="text-muted">
+                  Pie and bar charts update in real-time as you navigate
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="d-flex align-items-start">
+              <i class="fas fa-tachometer-alt fa-2x text-danger me-3 mt-1"></i>
+              <div>
+                <h5>Multiple Speeds</h5>
+                <p class="text-muted">
+                  Control playback: 0.5x, 1x, 2x, or 4x speed
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- How It Works -->
+      <div class="demo-card">
+        <h3 class="mb-4"><i class="fas fa-cogs"></i> How It Works</h3>
+
+        <div class="mb-4">
+          <div class="d-flex align-items-center mb-3">
+            <span class="step-number">1</span>
+            <h5 class="mb-0">Navigate to Poll Results</h5>
+          </div>
+          <p class="ms-5">
+            Go to any poll's results page. You'll see a new "Time Replay" button
+            in the navigation.
+          </p>
+        </div>
+
+        <div class="mb-4">
+          <div class="d-flex align-items-center mb-3">
+            <span class="step-number">2</span>
+            <h5 class="mb-0">Click Time Replay</h5>
+          </div>
+          <p class="ms-5">
+            Click the button to open the interactive replay interface.
+          </p>
+        </div>
+
+        <div class="mb-4">
+          <div class="d-flex align-items-center mb-3">
+            <span class="step-number">3</span>
+            <h5 class="mb-0">Explore the Timeline</h5>
+          </div>
+          <p class="ms-5">
+            Use the controls to navigate through time and watch results change:
+          </p>
+          <div class="ms-5">
+            <div class="control-demo">
+              <i class="fas fa-backward"></i>
+              <span>Jump to Start</span>
+            </div>
+            <div class="control-demo">
+              <div class="play-btn-demo">
+                <i class="fas fa-play"></i>
+              </div>
+              <span>Play/Pause</span>
+            </div>
+            <div class="control-demo">
+              <i class="fas fa-forward"></i>
+              <span>Jump to End</span>
+            </div>
+          </div>
+          <div class="ms-5 mt-3">
+            <div class="slider-demo">
+              <div class="slider-thumb"></div>
+            </div>
+            <p class="text-muted small mt-2">
+              Drag the slider to any time point
+            </p>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <div class="d-flex align-items-center mb-3">
+            <span class="step-number">4</span>
+            <h5 class="mb-0">Analyze the Data</h5>
+          </div>
+          <p class="ms-5">
+            Watch how vote percentages change, identify trends, and discover
+            insights!
+          </p>
+        </div>
+      </div>
+
+      <!-- Use Cases -->
+      <div class="demo-card">
+        <h3 class="mb-4"><i class="fas fa-lightbulb"></i> Use Cases</h3>
+
+        <div class="use-case">
+          <h5>
+            <i class="fas fa-chart-line text-primary"></i> Track Voting Momentum
+          </h5>
+          <p class="mb-0">
+            See when votes came in rapidly and identify periods of high
+            engagement.
+          </p>
+        </div>
+
+        <div class="use-case">
+          <h5>
+            <i class="fas fa-exchange-alt text-success"></i> Detect Opinion
+            Shifts
+          </h5>
+          <p class="mb-0">
+            Watch how the leading option changed over time and understand why.
+          </p>
+        </div>
+
+        <div class="use-case">
+          <h5>
+            <i class="fas fa-calendar-check text-info"></i> Correlate with
+            Events
+          </h5>
+          <p class="mb-0">
+            Match vote spikes with campaigns, announcements, or other events.
+          </p>
+        </div>
+
+        <div class="use-case">
+          <h5>
+            <i class="fas fa-graduation-cap text-warning"></i> Educational
+            Analysis
+          </h5>
+          <p class="mb-0">
+            Demonstrate polling concepts, sampling effects, and temporal trends.
+          </p>
+        </div>
+
+        <div class="use-case">
+          <h5>
+            <i class="fas fa-users text-danger"></i> Understand Voter Behavior
+          </h5>
+          <p class="mb-0">
+            Analyze when different voter segments participated in the poll.
+          </p>
+        </div>
+      </div>
+
+      <!-- Technical Highlights -->
+      <div class="demo-card">
+        <h3 class="mb-4"><i class="fas fa-code"></i> Technical Highlights</h3>
+        <div class="row">
+          <div class="col-md-4 mb-3 text-center">
+            <i class="fas fa-database fa-3x text-primary mb-2"></i>
+            <h6>No DB Changes</h6>
+            <p class="small text-muted">Uses existing tables and columns</p>
+          </div>
+          <div class="col-md-4 mb-3 text-center">
+            <i class="fas fa-bolt fa-3x text-warning mb-2"></i>
+            <h6>Fast Performance</h6>
+            <p class="small text-muted">Efficient SQL queries with indexing</p>
+          </div>
+          <div class="col-md-4 mb-3 text-center">
+            <i class="fas fa-mobile-alt fa-3x text-success mb-2"></i>
+            <h6>Responsive Design</h6>
+            <p class="small text-muted">Works on desktop and tablets</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Start -->
+      <div class="demo-card">
+        <h3 class="mb-4"><i class="fas fa-rocket"></i> Quick Start</h3>
+        <div class="alert alert-success">
+          <h5><i class="fas fa-check-circle"></i> Ready to Use!</h5>
+          <p class="mb-0">
+            The feature is installed and ready. Just visit any poll's results
+            page and click <strong>"Time Replay"</strong>!
+          </p>
+        </div>
+
+        <div class="mt-4">
+          <h5>Example URLs:</h5>
+          <ul>
+            <li>
+              <code>results.php?poll_id=1</code> → Click "Time Replay" button
+            </li>
+            <li><code>replay_results.php?poll_id=1</code> → Direct access</li>
+            <li>
+              <code>live_dashboard.php?poll_id=1</code> → Click "Time Replay"
+              button
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Resources -->
+      <div class="demo-card">
+        <h3 class="mb-4"><i class="fas fa-book"></i> Documentation</h3>
+        <div class="list-group">
+          <a
+            href="TIME_REPLAY_FEATURE.md"
+            class="list-group-item list-group-item-action"
+          >
+            <div class="d-flex w-100 justify-content-between">
+              <h6 class="mb-1">Feature Documentation</h6>
+              <small><i class="fas fa-file-alt"></i></small>
+            </div>
+            <p class="mb-1 small">
+              Complete technical documentation and API details
+            </p>
+          </a>
+          <a
+            href="INSTALL_TIME_REPLAY.md"
+            class="list-group-item list-group-item-action"
+          >
+            <div class="d-flex w-100 justify-content-between">
+              <h6 class="mb-1">Installation Guide</h6>
+              <small><i class="fas fa-tools"></i></small>
+            </div>
+            <p class="mb-1 small">
+              Setup instructions and troubleshooting tips
+            </p>
+          </a>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="text-center text-white mt-5">
+        <p><i class="fas fa-heart text-danger"></i> Built with Poll System</p>
+        <p class="small">Using Chart.js, Bootstrap 5, and Font Awesome</p>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
