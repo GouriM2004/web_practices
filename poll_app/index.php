@@ -171,7 +171,15 @@ $recommendations = $pollModel->getRecommendedPolls($voterId, $lastLocation, 5);
         <?php endif; ?>
 
         <div class="text-center mt-4">
-          <small class="text-muted">
+          <div class="mb-3">
+            <a href="poll_battles.php" class="btn btn-danger btn-lg">
+              <i class="fas fa-fire"></i> Play Poll Battles
+            </a>
+            <a href="trending.php" class="btn btn-warning btn-lg ms-2">
+              <i class="fas fa-trophy"></i> View Trending
+            </a>
+          </div>
+          <small class="text-muted d-block">
             Admin? <a href="admin/login.php">Go to Admin Panel</a>
           </small>
         </div>
