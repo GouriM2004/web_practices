@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Happy New Year name</title>
+
+<!-- Google Font -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+<!-- Bootstrap CSS -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Poppins',sans-serif}
+
+body{
+margin-top: 10px;
+  background:#ffd6e5;
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.wrapper{
+  background:#0f0f1a;
+  color:#fff;
+  width:90%;
+  max-width:1100px;
+  border-radius:30px;
+  padding:40px;
+  box-shadow:0 40px 80px rgba(0,0,0,.4);
+  position:relative;
+  overflow:hidden;
+}
+
+/* Decorative shapes */
+.wrapper::before{
+  content:"";
+  position:absolute;
+  top:-60px;
+  right:-60px;
+  width:200px;
+  height:200px;
+  background:#ff7aa2;
+  border-radius:50%;
+  opacity:.3;
+}
+.wrapper::after{
+  content:"";
+  position:absolute;
+  bottom:-70px;
+  left:-70px;
+  width:220px;
+  height:220px;
+  background:#8be9fd;
+  border-radius:50%;
+  opacity:.25;
+}
+
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.logo{
+  font-weight:700;
+  letter-spacing:2px;
+}
+
+.music-btn{
+  background:#ff7aa2;
+  border:none;
+  padding:10px 18px;
+  border-radius:30px;
+  cursor:pointer;
+  color:#000;
+  font-weight:600;
+}
+
+.hero{
+  display:grid;
+  grid-template-columns:1.2fr 1fr;
+  gap:30px;
+  margin-top:40px;
+}
+
+.hero h1{
+  font-size:3.2rem;
+  line-height:1.2;
+}
+
+.hero h1 span{
+  color:#ff7aa2;
+}
+
+.hero p{
+  margin:20px 0;
+  opacity:.9;
+  line-height:1.8;
+}
+
+.highlight{
+  background:#ff7aa2;
+  color:#000;
+  display:inline-block;
+  padding:6px 14px;
+  border-radius:20px;
+  font-size:.9rem;
+  margin-bottom:15px;
+}
+
+.year{
+  font-size:5rem;
+  font-weight:700;
+  color:#8be9fd;
+}
+
+.images{
+  position:relative;
+}
+
+.images img{
+  border-radius:20px;
+  box-shadow:0 20px 40px rgba(0,0,0,.5);
+}
+
+.img-main{
+  width:100%;
+  height:320px;
+  object-fit:cover;
+}
+
+.img-small{
+  width:160px;
+  height:200px;
+  object-fit:cover;
+  position:absolute;
+  bottom:-30px;
+  left:-30px;
+  border:6px solid #0f0f1a;
+}
+
+.quotes{
+  margin-top:60px;
+  text-align:center;
+  font-size:1.1rem;
+  line-height:2;
+  max-width:800px;
+  margin-left:auto;
+  margin-right:auto;
+}
+
+.footer{
+  text-align:center;
+  margin-top:50px;
+  font-size:.9rem;
+  opacity:.8;
+}
+
+@media(max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .hero h1{font-size:2.5rem}
+  .year{font-size:4rem}
+  .img-small{display:none}
+}
+
+/* Falling hearts */
+.heart-fall {
+  position: fixed;
+  top: -10px;
+  color: rgba(255, 122, 162, 0.8);
+  font-size: 16px;
+  animation: fall linear forwards;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+@keyframes fall {
+  to {
+    transform: translateY(110vh);
+    opacity: 0;
+  }
+}
+
+/* Sparkles */
+.sparkle {
+  position: fixed;
+  width: 6px;
+  height: 6px;
+  background: radial-gradient(circle, #fff, rgba(255,255,255,0.1));
+  border-radius: 50%;
+  pointer-events: none;
+  animation: sparkleFade 2.5s linear forwards;
+  z-index: 9998;
+}
+
+@keyframes sparkleFade {
+  0% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.2); }
+}
+</style>
+</head>
+
+<body>
+
+<!-- AUDIO -->
+<audio id="music" preload="auto">
+  <source src="lae dooba.mp3" type="audio/mpeg">
+</audio>
+
+<div class="wrapper">
+
+  <div class="header">
+    <div class="logo">NEW YEAR</div>
+    <button class="music-btn" id="musicBtn">▶ Play Music</button>
+  </div>
+
+  <div class="hero">
+    <div>
+      <div class="highlight">A quiet message for you</div>
+      <h1>Happy New Year<br><span>name</span></h1>
+
+      <p>
+        As this New Year begins, I wish you a life filled with peace, gentle growth,
+        and moments that make you smile without effort
+      </p>
+
+      <div class="year">2026</div>
+    </div>
+
+    <div class="images">
+      <img src="img1.jpeg" class="img-main">
+      <img src="img2.jpeg" class="img-small">
+    </div>
+  </div>
+
+  <div class="quotes">
+   quote1
+    <br><br>
+    quote2
+  </div>
+
+  <div class="footer">
+    Made with care, and love 🤍
+  </div>
+
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const music = document.getElementById("music");
+const btn = document.getElementById("musicBtn");
+
+music.volume = 0.4;
+
+btn.addEventListener("click", () => {
+  if (music.paused) {
+    music.play().then(() => {
+      btn.innerText = "⏸ Pause Music";
+    }).catch(() => {
+      alert("Please open this page using localhost (XAMPP/WAMP).");
+    });
+  } else {
+    music.pause();
+    btn.innerText = "▶ Play Music";
+  }
+});
+
+/* Falling Hearts */
+function createHeart() {
+  const heart = document.createElement("div");
+  heart.className = "heart-fall";
+  heart.innerHTML = Math.random() > 0.5 ? "❤" : "🤍";
+
+  heart.style.left = Math.random() * 100 + "vw";
+  heart.style.fontSize = Math.random() * 10 + 14 + "px";
+  heart.style.animationDuration = Math.random() * 3 + 4 + "s";
+
+  document.body.appendChild(heart);
+  setTimeout(() => heart.remove(), 7000);
+}
+setInterval(createHeart, 700);
+
+/* Sparkles */
+function createSparkle() {
+  const sparkle = document.createElement("div");
+  sparkle.className = "sparkle";
+
+  sparkle.style.left = Math.random() * 100 + "vw";
+  sparkle.style.top = Math.random() * 100 + "vh";
+
+  document.body.appendChild(sparkle);
+  setTimeout(() => sparkle.remove(), 2500);
+}
+setInterval(createSparkle, 400);
+</script>
+
+</body>
+</html>
