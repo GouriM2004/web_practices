@@ -698,4 +698,266 @@ class Poll
             'snapshots' => $snapshots
         ];
     }
+
+    // ========== Duet Polls Methods ==========
+
+    /**
+     * Create a duet poll with collaboration invitation
+     * @param string $question Poll question
+     * @param array $options Array of option texts
+     * @param int $creator1_id First creator/admin ID
+     * @param int $creator2_id Second creator/admin ID (collaborator)
+     * @param bool $allow_multiple Allow multiple choice
+     * @param string $category Poll category
+     * @param string|null $location_tag Location tag
+     * @param string|null $collaboration_notes Optional notes about collaboration
+     * @return int|false Poll ID on success, false on failure
+     */
+    public function createDuetPoll($question, $options, $creator1_id, $creator2_id, $allow_multiple = 0, $category = 'General', $location_tag = null, $collaboration_notes = null)
+    {
+        // Validate that creator IDs are different
+        if ($creator1_id === $creator2_id) {
+            return false;
+        }
+
+        $this->db->begin_transaction();
+        try {
+            // Create the poll
+            $is_duet = 1;
+            $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, is_duet, category, location_tag) VALUES (?, 1, ?, ?, ?, ?)");
+            $stmt->bind_param("siiss", $question, $allow_multiple, $is_duet, $category, $location_tag);
+            $stmt->execute();
+            $poll_id = $this->db->insert_id;
+            $stmt->close();
+
+            // Insert options
+            foreach ($options as $opt_text) {
+                $stmt = $this->db->prepare("INSERT INTO poll_options (poll_id, option_text, votes) VALUES (?, ?, 0)");
+                $stmt->bind_param("is", $poll_id, $opt_text);
+                $stmt->execute();
+                $stmt->close();
+            }
+
+            // Create duet poll record
+            $stmt = $this->db->prepare("INSERT INTO duet_polls (poll_id, creator1_id, creator2_id, invitation_status, collaboration_notes) VALUES (?, ?, ?, 'pending', ?)");
+            $stmt->bind_param("iiis", $poll_id, $creator1_id, $creator2_id, $collaboration_notes);
+            $stmt->execute();
+            $duet_poll_id = $this->db->insert_id;
+            $stmt->close();
+
+            // Log activity
+            $activity_desc = "Duet poll created and invitation sent to collaborator";
+            $stmt = $this->db->prepare("INSERT INTO duet_poll_activity (duet_poll_id, admin_id, activity_type, activity_description) VALUES (?, ?, 'created', ?)");
+            $stmt->bind_param("iis", $duet_poll_id, $creator1_id, $activity_desc);
+            $stmt->execute();
+            $stmt->close();
+
+            $this->db->commit();
+            return $poll_id;
+        } catch (\Throwable $e) {
+            $this->db->rollback();
+            return false;
+        }
+    }
+
+    /**
+     * Get duet poll information by poll ID
+     */
+    public function getDuetPollInfo($poll_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT dp.*, 
+                   a1.username as creator1_username,
+                   a2.username as creator2_username,
+                   p.question, p.is_active, p.category
+            FROM duet_polls dp
+            JOIN admins a1 ON dp.creator1_id = a1.id
+            JOIN admins a2 ON dp.creator2_id = a2.id
+            JOIN polls p ON dp.poll_id = p.id
+            WHERE dp.poll_id = ?
+        ");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $result ?: null;
+    }
+
+    /**
+     * Accept duet poll invitation
+     */
+    public function acceptDuetInvitation($poll_id, $admin_id)
+    {
+        $this->db->begin_transaction();
+        try {
+            // Update invitation status
+            $stmt = $this->db->prepare("
+                UPDATE duet_polls 
+                SET invitation_status = 'accepted', invitation_responded_at = NOW() 
+                WHERE poll_id = ? AND creator2_id = ?
+            ");
+            $stmt->bind_param("ii", $poll_id, $admin_id);
+            $stmt->execute();
+            $affected = $stmt->affected_rows;
+            $stmt->close();
+
+            if ($affected === 0) {
+                $this->db->rollback();
+                return false;
+            }
+
+            // Get duet poll ID for activity logging
+            $stmt = $this->db->prepare("SELECT id FROM duet_polls WHERE poll_id = ?");
+            $stmt->bind_param("i", $poll_id);
+            $stmt->execute();
+            $duet_poll_id = $stmt->get_result()->fetch_assoc()['id'] ?? null;
+            $stmt->close();
+
+            if ($duet_poll_id) {
+                $activity_desc = "Collaboration invitation accepted";
+                $stmt = $this->db->prepare("INSERT INTO duet_poll_activity (duet_poll_id, admin_id, activity_type, activity_description) VALUES (?, ?, 'accepted', ?)");
+                $stmt->bind_param("iis", $duet_poll_id, $admin_id, $activity_desc);
+                $stmt->execute();
+                $stmt->close();
+            }
+
+            $this->db->commit();
+            return true;
+        } catch (\Throwable $e) {
+            $this->db->rollback();
+            return false;
+        }
+    }
+
+    /**
+     * Decline duet poll invitation
+     */
+    public function declineDuetInvitation($poll_id, $admin_id)
+    {
+        $stmt = $this->db->prepare("
+            UPDATE duet_polls 
+            SET invitation_status = 'declined', invitation_responded_at = NOW() 
+            WHERE poll_id = ? AND creator2_id = ?
+        ");
+        $stmt->bind_param("ii", $poll_id, $admin_id);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        return $affected > 0;
+    }
+
+    /**
+     * Check if admin has access to duet poll (is either creator)
+     */
+    public function adminHasDuetAccess($poll_id, $admin_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) as count 
+            FROM duet_polls 
+            WHERE poll_id = ? AND (creator1_id = ? OR creator2_id = ?)
+        ");
+        $stmt->bind_param("iii", $poll_id, $admin_id, $admin_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return ($result['count'] ?? 0) > 0;
+    }
+
+    /**
+     * Get all duet polls for a specific admin (either as creator1 or creator2)
+     */
+    public function getDuetPollsForAdmin($admin_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT dp.*, 
+                   p.question, p.is_active, p.category, p.created_at as poll_created_at,
+                   a1.username as creator1_username,
+                   a2.username as creator2_username
+            FROM duet_polls dp
+            JOIN polls p ON dp.poll_id = p.id
+            JOIN admins a1 ON dp.creator1_id = a1.id
+            JOIN admins a2 ON dp.creator2_id = a2.id
+            WHERE dp.creator1_id = ? OR dp.creator2_id = ?
+            ORDER BY dp.created_at DESC
+        ");
+        $stmt->bind_param("ii", $admin_id, $admin_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result ?: [];
+    }
+
+    /**
+     * Get pending duet poll invitations for an admin
+     */
+    public function getPendingDuetInvitations($admin_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT dp.*, 
+                   p.question, p.category, p.created_at as poll_created_at,
+                   a1.username as creator1_username
+            FROM duet_polls dp
+            JOIN polls p ON dp.poll_id = p.id
+            JOIN admins a1 ON dp.creator1_id = a1.id
+            WHERE dp.creator2_id = ? AND dp.invitation_status = 'pending'
+            ORDER BY dp.invitation_sent_at DESC
+        ");
+        $stmt->bind_param("i", $admin_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result ?: [];
+    }
+
+    /**
+     * Get activity log for a duet poll
+     */
+    public function getDuetPollActivity($poll_id)
+    {
+        $stmt = $this->db->prepare("
+            SELECT dpa.*, a.username
+            FROM duet_poll_activity dpa
+            JOIN admins a ON dpa.admin_id = a.id
+            WHERE dpa.duet_poll_id = (SELECT id FROM duet_polls WHERE poll_id = ?)
+            ORDER BY dpa.created_at DESC
+        ");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result ?: [];
+    }
+
+    /**
+     * Get all admins (for selecting collaborators)
+     */
+    public function getAllAdmins()
+    {
+        $sql = "SELECT id, username, created_at FROM admins ORDER BY username ASC";
+        $res = $this->db->query($sql);
+        return $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+    }
+
+    /**
+     * Log activity for a duet poll
+     */
+    public function logDuetActivity($poll_id, $admin_id, $activity_type, $activity_description = null)
+    {
+        $stmt = $this->db->prepare("SELECT id FROM duet_polls WHERE poll_id = ?");
+        $stmt->bind_param("i", $poll_id);
+        $stmt->execute();
+        $duet_poll_id = $stmt->get_result()->fetch_assoc()['id'] ?? null;
+        $stmt->close();
+
+        if (!$duet_poll_id) {
+            return false;
+        }
+
+        $stmt = $this->db->prepare("INSERT INTO duet_poll_activity (duet_poll_id, admin_id, activity_type, activity_description) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("iiss", $duet_poll_id, $admin_id, $activity_type, $activity_description);
+        $stmt->execute();
+        $success = $stmt->affected_rows > 0;
+        $stmt->close();
+        return $success;
+    }
 }
