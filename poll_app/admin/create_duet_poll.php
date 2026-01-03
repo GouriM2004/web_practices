@@ -11,6 +11,7 @@ $category = '';
 $locationTag = '';
 $collaboratorId = '';
 $collaborationNotes = '';
+$isEmojiOnly = 0;
 $cleanOptions = [];
 
 // Get list of all admins for collaboration selection
@@ -30,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $collaborationNotes = trim($_POST['collaboration_notes'] ?? '');
     $options = $_POST['options'] ?? [];
     $allow_multiple = isset($_POST['allow_multiple']) ? 1 : 0;
+    $isEmojiOnly = isset($_POST['is_emoji_only']) ? 1 : 0;
 
     $cleanOptions = [];
     foreach ($options as $opt) {
@@ -41,7 +43,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = "Question is required and at least 2 options.";
     } elseif ($collaboratorId === 0) {
         $error = "Please select a collaborator for this duet poll.";
-    } else {
+    } elseif ($isEmojiOnly) {
+        $invalidEmoji = $pollModel->validateEmojiOnlyOptions($cleanOptions);
+        if (!empty($invalidEmoji)) {
+            $error = "Emoji-only duet polls need options that contain only emojis (no text or numbers).";
+        }
+    }
+
+    if ($error === '') {
         $useCategory = $category !== '' ? $category : 'General';
         $useLocation = $locationTag !== '' ? $locationTag : null;
         $useNotes = $collaborationNotes !== '' ? $collaborationNotes : null;
@@ -54,7 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $allow_multiple,
             $useCategory,
             $useLocation,
-            $useNotes
+            $useNotes,
+            $isEmojiOnly
         );
 
         if ($poll_id) {
@@ -64,6 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $locationTag = '';
             $collaboratorId = '';
             $collaborationNotes = '';
+            $isEmojiOnly = 0;
             $cleanOptions = [];
         } else {
             $error = "Failed to create duet poll.";
@@ -103,6 +114,43 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
       `;
             container.appendChild(div);
         }
+
+        function isEmojiOnly(value) {
+            const trimmed = (value || '').trim();
+            if (!trimmed) return false;
+
+            try {
+                const emojiPattern = /\p{Extended_Pictographic}/u;
+                const nonEmoji = trimmed.replace(/[\p{Extended_Pictographic}\s\u200D\uFE0F]/gu, '');
+                return nonEmoji.length === 0 && emojiPattern.test(trimmed);
+            } catch (err) {
+                const fallback = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF\u{1F1E6}-\u{1F1FF}]/u;
+                const nonEmoji = trimmed.replace(fallback, '').replace(/[\s\u200D\uFE0F]/g, '');
+                return nonEmoji.length === 0 && fallback.test(trimmed);
+            }
+        }
+
+        function validateEmojiOnlyPoll(event) {
+            const toggle = document.getElementById('emojiOnlyToggle');
+            if (!toggle || !toggle.checked) return true;
+            const inputs = document.querySelectorAll('input[name="options[]"]');
+            for (const input of inputs) {
+                if (input && input.value && !isEmojiOnly(input.value)) {
+                    event.preventDefault();
+                    alert('Emoji-only polls require every option to be emojis only. Remove text, numbers, or punctuation.');
+                    input.focus();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('createDuetPollForm');
+            if (form) {
+                form.addEventListener('submit', validateEmojiOnlyPoll);
+            }
+        });
     </script>
 </head>
 
@@ -142,7 +190,7 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
                             <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
                         <?php endif; ?>
 
-                        <form method="post">
+                        <form method="post" id="createDuetPollForm">
 
                             <!-- Collaborator Selection -->
                             <div class="mb-4 p-3 bg-light rounded">
@@ -195,6 +243,16 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
                                 <label class="form-check-label" for="allowMultiple">
                                     Allow multiple choice selection
                                 </label>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="is_emoji_only" id="emojiOnlyToggle" value="1" <?= $isEmojiOnly ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="emojiOnlyToggle">
+                                        Emoji-only options (😀🔥💯)
+                                    </label>
+                                    <small class="form-text text-muted">All options must be emojis. Great for viral, ultra-fast votes.</small>
+                                </div>
                             </div>
 
                             <hr>

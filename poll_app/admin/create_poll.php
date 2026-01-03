@@ -9,6 +9,7 @@ $success = '';
 $question = '';
 $category = '';
 $locationTag = '';
+$isEmojiOnly = 0;
 $cleanOptions = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -17,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $locationTag = trim($_POST['location_tag'] ?? '');
   $options = $_POST['options'] ?? [];
   $allow_multiple = isset($_POST['allow_multiple']) ? 1 : 0;
+  $isEmojiOnly = isset($_POST['is_emoji_only']) ? 1 : 0;
 
   $cleanOptions = [];
   foreach ($options as $opt) {
@@ -26,15 +28,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($question === '' || count($cleanOptions) < 2) {
     $error = "Question is required and at least 2 options.";
-  } else {
+  } elseif ($isEmojiOnly) {
+    $invalidEmoji = $pollModel->validateEmojiOnlyOptions($cleanOptions);
+    if (!empty($invalidEmoji)) {
+      $error = "Emoji-only polls need options that contain only emojis (no text or numbers).";
+    }
+  }
+
+  if ($error === '') {
     $useCategory = $category !== '' ? $category : 'General';
     $useLocation = $locationTag !== '' ? $locationTag : null;
-    $poll_id = $pollModel->createPoll($question, $cleanOptions, $allow_multiple, $useCategory, $useLocation);
+    $poll_id = $pollModel->createPoll($question, $cleanOptions, $allow_multiple, $useCategory, $useLocation, $isEmojiOnly);
     if ($poll_id) {
       $success = "Poll created successfully.";
       $question = '';
       $category = '';
       $locationTag = '';
+      $isEmojiOnly = 0;
       $cleanOptions = [];
     } else {
       $error = "Failed to create poll.";
@@ -64,6 +74,43 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
       `;
       container.appendChild(div);
     }
+
+    function isEmojiOnly(value) {
+      const trimmed = (value || '').trim();
+      if (!trimmed) return false;
+
+      try {
+        const emojiPattern = /\p{Extended_Pictographic}/u;
+        const nonEmoji = trimmed.replace(/[\p{Extended_Pictographic}\s\u200D\uFE0F]/gu, '');
+        return nonEmoji.length === 0 && emojiPattern.test(trimmed);
+      } catch (err) {
+        const fallback = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF\u{1F1E6}-\u{1F1FF}]/u;
+        const nonEmoji = trimmed.replace(fallback, '').replace(/[\s\u200D\uFE0F]/g, '');
+        return nonEmoji.length === 0 && fallback.test(trimmed);
+      }
+    }
+
+    function validateEmojiOnlyPoll(event) {
+      const toggle = document.getElementById('emojiOnlyToggle');
+      if (!toggle || !toggle.checked) return true;
+      const inputs = document.querySelectorAll('input[name="options[]"]');
+      for (const input of inputs) {
+        if (input && input.value && !isEmojiOnly(input.value)) {
+          event.preventDefault();
+          alert('Emoji-only polls require every option to be emojis only. Remove text, numbers, or punctuation.');
+          input.focus();
+          return false;
+        }
+      }
+      return true;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const form = document.getElementById('createPollForm');
+      if (form) {
+        form.addEventListener('submit', validateEmojiOnlyPoll);
+      }
+    });
   </script>
 </head>
 
@@ -96,32 +143,42 @@ $existingOptions = $cleanOptions ?: ['', '', ''];
               <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
             <?php endif; ?>
 
-            <form method="post">
+            <form method="post" id="createPollForm">
               <div class="mb-3">
                 <label class="form-label">Question</label>
                 <input type="text" name="question" class="form-control"
-                       value="<?= htmlspecialchars($question) ?>" required>
+                  value="<?= htmlspecialchars($question) ?>" required>
               </div>
 
               <div class="mb-3">
                 <label class="form-label">Category (for recommendations)</label>
                 <input type="text" name="category" class="form-control" placeholder="e.g., Sports, Tech, Music"
-                       value="<?= htmlspecialchars($category) ?>">
+                  value="<?= htmlspecialchars($category) ?>">
               </div>
 
               <div class="mb-3">
                 <label class="form-label">Location Tag (optional)</label>
                 <input type="text" name="location_tag" class="form-control" placeholder="e.g., California, UK, Remote"
-                       value="<?= htmlspecialchars($locationTag) ?>">
+                  value="<?= htmlspecialchars($locationTag) ?>">
                 <small class="text-muted">Helps surface polls to voters from matching regions.</small>
               </div>
 
               <div class="mb-3">
                 <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="allow_multiple" id="allowMultiple" value="1">
+                  <input class="form-check-input" type="checkbox" name="allow_multiple" id="allowMultiple" value="1" <?= isset($_POST['allow_multiple']) ? 'checked' : '' ?>>
                   <label class="form-check-label" for="allowMultiple">
                     Allow multiple choice (users can select more than one option)
                   </label>
+                </div>
+              </div>
+
+              <div class="mb-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="is_emoji_only" id="emojiOnlyToggle" value="1" <?= $isEmojiOnly ? 'checked' : '' ?>>
+                  <label class="form-check-label" for="emojiOnlyToggle">
+                    Emoji-only options (😀🔥💯)
+                  </label>
+                  <small class="text-muted">Every option must be emoji-only. Perfect for quick, viral polls.</small>
                 </div>
               </div>
 

@@ -52,3 +52,9 @@ ALTER TABLE poll_votes
 UPDATE poll_votes 
 SET voter_type = 'public' 
 WHERE voter_type IS NULL;
+
+-- 4) Emoji-only polls (options must be emojis)
+ALTER TABLE polls
+  ADD COLUMN IF NOT EXISTS is_emoji_only TINYINT(1) DEFAULT 0 AFTER allow_multiple;
+
+DESCRIBE polls;

@@ -11,6 +11,52 @@ class Poll
         $this->db = Database::getConnection();
     }
 
+    private function getEmojiRegex()
+    {
+        static $emojiRegex = null;
+        if ($emojiRegex !== null) {
+            return $emojiRegex;
+        }
+
+        $preferred = '/\\p{Extended_Pictographic}/u';
+        $test = @preg_match($preferred, "😀");
+        if ($test === false) {
+            $emojiRegex = '/[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{1F1E6}-\\x{1F1FF}]/u';
+        } else {
+            $emojiRegex = $preferred;
+        }
+
+        return $emojiRegex;
+    }
+
+    private function isEmojiOnly(string $text): bool
+    {
+        $trimmed = trim($text);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $emojiRegex = $this->getEmojiRegex();
+        $nonEmoji = preg_replace([$emojiRegex, '/[\s\\x{200D}\\x{FE0F}]/u'], '', $trimmed);
+
+        if ($nonEmoji === null) {
+            return false;
+        }
+
+        return $nonEmoji === '' && preg_match($emojiRegex, $trimmed);
+    }
+
+    public function validateEmojiOnlyOptions(array $options): array
+    {
+        $invalid = [];
+        foreach ($options as $opt) {
+            if (!$this->isEmojiOnly($opt)) {
+                $invalid[] = $opt;
+            }
+        }
+        return $invalid;
+    }
+
     public function getActivePoll()
     {
         $sql = "SELECT * FROM polls WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1";
@@ -229,10 +275,19 @@ class Poll
         $stmt->close();
     }
 
-    public function createPoll($question, array $options, $allow_multiple = 0, $category = 'General', $location_tag = null)
+    public function createPoll($question, array $options, $allow_multiple = 0, $category = 'General', $location_tag = null, $is_emoji_only = 0)
     {
-        $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, category, location_tag) VALUES (?, 1, ?, ?, ?)");
-        $stmt->bind_param("siss", $question, $allow_multiple, $category, $location_tag);
+        if ($is_emoji_only) {
+            $invalidEmoji = $this->validateEmojiOnlyOptions($options);
+            if (!empty($invalidEmoji)) {
+                return false;
+            }
+        }
+
+        $emojiFlag = $is_emoji_only ? 1 : 0;
+
+        $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, is_emoji_only, category, location_tag) VALUES (?, 1, ?, ?, ?, ?)");
+        $stmt->bind_param("siiss", $question, $allow_multiple, $emojiFlag, $category, $location_tag);
         if (!$stmt->execute()) {
             $stmt->close();
             return false;
@@ -711,21 +766,30 @@ class Poll
      * @param string $category Poll category
      * @param string|null $location_tag Location tag
      * @param string|null $collaboration_notes Optional notes about collaboration
+     * @param bool $is_emoji_only Restrict options to emojis only
      * @return int|false Poll ID on success, false on failure
      */
-    public function createDuetPoll($question, $options, $creator1_id, $creator2_id, $allow_multiple = 0, $category = 'General', $location_tag = null, $collaboration_notes = null)
+    public function createDuetPoll($question, $options, $creator1_id, $creator2_id, $allow_multiple = 0, $category = 'General', $location_tag = null, $collaboration_notes = null, $is_emoji_only = 0)
     {
         // Validate that creator IDs are different
         if ($creator1_id === $creator2_id) {
             return false;
         }
 
+        if ($is_emoji_only) {
+            $invalidEmoji = $this->validateEmojiOnlyOptions($options);
+            if (!empty($invalidEmoji)) {
+                return false;
+            }
+        }
+
         $this->db->begin_transaction();
         try {
             // Create the poll
             $is_duet = 1;
-            $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, is_duet, category, location_tag) VALUES (?, 1, ?, ?, ?, ?)");
-            $stmt->bind_param("siiss", $question, $allow_multiple, $is_duet, $category, $location_tag);
+            $emojiFlag = $is_emoji_only ? 1 : 0;
+            $stmt = $this->db->prepare("INSERT INTO polls (question, is_active, allow_multiple, is_duet, is_emoji_only, category, location_tag) VALUES (?, 1, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("siiiss", $question, $allow_multiple, $is_duet, $emojiFlag, $category, $location_tag);
             $stmt->execute();
             $poll_id = $this->db->insert_id;
             $stmt->close();

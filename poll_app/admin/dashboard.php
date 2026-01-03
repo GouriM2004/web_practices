@@ -151,6 +151,9 @@ $polls = $pollModel->getAllPolls();
                       <?php else: ?>
                         <span class="badge bg-secondary">Single</span>
                       <?php endif; ?>
+                      <?php if (!empty($poll['is_emoji_only'])): ?>
+                        <span class="badge bg-warning text-dark ms-1">Emoji</span>
+                      <?php endif; ?>
                     </td>
                     <td>
                       <?php if ($poll['is_active']): ?>
